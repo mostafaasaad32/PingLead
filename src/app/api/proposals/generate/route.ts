@@ -13,6 +13,7 @@ import { generateContextAwareProposal } from '@/lib/ai/proposal-generator';
 import { getProjectPricing, pricingPromptHint } from '@/lib/insights/pricing';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();

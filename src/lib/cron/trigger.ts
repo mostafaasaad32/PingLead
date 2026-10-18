@@ -10,8 +10,16 @@ let lastTriggeredAt = 0;
 let inFlight: Promise<any> | null = null;
 
 function internalBaseUrl(): string {
-  return process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
+  if (process.env.APP_URL) return process.env.APP_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return `http://localhost:${process.env.PORT || 3000}`;
 }
+
+/**
+ * On Vercel the ingestion is driven by an external every-minute cron (cron-job.org),
+ * and serverless instances don't share memory, so page-load triggers would multiply.
+ */
+export const pageLoadTriggersEnabled = !process.env.VERCEL;
 
 /**
  * Triggers one ingestion cycle. Calls within MIN_INTERVAL_MS of the previous

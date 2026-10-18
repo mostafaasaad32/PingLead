@@ -21,6 +21,8 @@ import { getProjectPricing, pricingPromptHint } from '@/lib/insights/pricing';
 import { PortfolioItem, extractTitleFromPostText, extractDetailsFromPostText } from '@/lib/scrapers/types';
 
 export const dynamic = 'force-dynamic';
+// AI proposal generation can take several seconds; give serverless room to finish
+export const maxDuration = 60;
 
 /**
  * Resolves the PingLead user linked to a Telegram chat (freelancer_profiles first, legacy profiles second).

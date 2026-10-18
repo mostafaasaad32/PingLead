@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { PLATFORMS_METADATA, PROJECT_INSIGHT_KEYS } from '@/lib/scrapers/types';
-import { triggerIngest } from '@/lib/cron/trigger';
+import { triggerIngest, pageLoadTriggersEnabled } from '@/lib/cron/trigger';
 import { getRates } from '@/lib/currency/rates';
 import { getProjectPricing } from '@/lib/insights/pricing';
 
@@ -69,8 +69,9 @@ async function attachProjectInsights(leads: any[]): Promise<any[]> {
 
 export async function GET(req: NextRequest) {
   try {
-    // Non-blocking auto-scrape: keeps database fresh (rate-limited to once per 60s inside triggerIngest)
-    triggerIngest(true).catch(() => {});
+    // Non-blocking auto-scrape for self-hosted/local runs (rate-limited to once per 60s inside triggerIngest).
+    // On Vercel the external cron does this instead.
+    if (pageLoadTriggersEnabled) triggerIngest(true).catch(() => {});
 
     const category = req.nextUrl.searchParams.get('category');
     const platform = req.nextUrl.searchParams.get('platform');
