@@ -21,7 +21,15 @@ export async function getOrEnsureFreelancerProfile(
   fullName?: string
 ): Promise<FreelancerProfile | null> {
   try {
-    // 1. Try to fetch existing profile
+    if (!userId) return null;
+
+    // 1. Verify session exists so RLS doesn't fail on unauthenticated requests
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData?.session) {
+      return null;
+    }
+
+    // 2. Try to fetch existing profile
     const { data: profile, error } = await supabase
       .from("freelancer_profiles")
       .select("*")
@@ -32,7 +40,7 @@ export async function getOrEnsureFreelancerProfile(
       return profile;
     }
 
-    // 2. If not found or error, create the profile
+    // 3. If not found or error, create the profile
     const defaultName =
       fullName || (email ? email.split("@")[0] : "Freelancer");
 
@@ -53,11 +61,10 @@ export async function getOrEnsureFreelancerProfile(
       .from("freelancer_profiles")
       .insert(newProfile)
       .select()
-      .single();
+      .maybeSingle();
 
     if (insertError) {
-      console.error("[Profile] Error inserting profile:", insertError);
-      // If error was conflict (created concurrently), fetch it
+      // If error was conflict (created concurrently by DB trigger), fetch it
       const { data: fallback } = await supabase
         .from("freelancer_profiles")
         .select("*")
@@ -68,7 +75,6 @@ export async function getOrEnsureFreelancerProfile(
 
     return inserted;
   } catch (err) {
-    console.error("[Profile] Exception in getOrEnsureFreelancerProfile:", err);
     return null;
   }
 }

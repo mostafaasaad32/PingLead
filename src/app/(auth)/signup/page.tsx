@@ -70,20 +70,20 @@ function SignUpForm() {
       }
 
       if (data?.user) {
-        // Guarantee profile creation with 25 credits in Supabase
-        await getOrEnsureFreelancerProfile(
-          supabase,
-          data.user.id,
-          data.user.email,
-          fullName
-        );
-
-        // If session exists immediately (email confirmation disabled or auto-confirmed)
+        // If session exists immediately (e.g. email confirmation disabled or auto-confirmed)
         if (data.session) {
+          await getOrEnsureFreelancerProfile(
+            supabase,
+            data.user.id,
+            data.user.email,
+            fullName
+          );
           router.push(returnUrl);
           router.refresh();
         } else {
-          // Email confirmation is required by Supabase
+          // Email confirmation is required by Supabase.
+          // The Postgres trigger on_auth_user_created_freelancer automatically creates
+          // the profile with 25 credits via SECURITY DEFINER in the database.
           setConfirmNotice(true);
         }
       }
