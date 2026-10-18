@@ -51,6 +51,18 @@ CREATE POLICY "Users manage own proposal templates"
 CREATE OR REPLACE FUNCTION public.handle_new_freelancer_user()
 RETURNS TRIGGER AS $$
 BEGIN
+  -- Strict Check: Do not insert any data if the user has not completed verification yet
+  IF NEW.email_confirmed_at IS NULL AND NEW.confirmed_at IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- On UPDATE, only proceed if the user just became verified (transition from unverified -> verified)
+  IF TG_OP = 'UPDATE' THEN
+    IF OLD.email_confirmed_at IS NOT NULL OR OLD.confirmed_at IS NOT NULL THEN
+      RETURN NEW;
+    END IF;
+  END IF;
+
   -- Create default profile with 25 AI credits and Egyptian timezone
   INSERT INTO public.freelancer_profiles (
     user_id,
@@ -93,7 +105,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- Re-bind trigger to auth.users
 DROP TRIGGER IF EXISTS on_auth_user_created_freelancer ON auth.users;
 CREATE TRIGGER on_auth_user_created_freelancer
-  AFTER INSERT ON auth.users
+  AFTER INSERT OR UPDATE OF email_confirmed_at, confirmed_at ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_freelancer_user();
 
 -- 4. Backfill any existing users in auth.users missing freelancer_profiles

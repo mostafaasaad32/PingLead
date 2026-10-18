@@ -23,9 +23,14 @@ export async function getOrEnsureFreelancerProfile(
   try {
     if (!userId) return null;
 
-    // 1. Verify session exists so RLS doesn't fail on unauthenticated requests
+    // 1. Verify session exists and email is confirmed before allowing profile insertion
     const { data: sessionData } = await supabase.auth.getSession();
     if (!sessionData?.session) {
+      return null;
+    }
+
+    const sessionUser = sessionData.session.user;
+    if (!sessionUser.email_confirmed_at && !sessionUser.confirmed_at) {
       return null;
     }
 
