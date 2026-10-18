@@ -13,6 +13,8 @@ import {
   Eye,
   EyeOff,
   ShieldCheck,
+  KeyRound,
+  RotateCcw,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -27,7 +29,15 @@ function LoginForm() {
   const [mode, setMode] = useState<"password" | "magic_link">("password");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  
+  // OTP Verification state
   const [sentMagicLink, setSentMagicLink] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [resendingOtp, setResendingOtp] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
+
   const [errorMsg, setErrorMsg] = useState<string | null>(
     urlError === "auth_callback_failed"
       ? "تعذر التحقق من تسجيل الدخول. يرجى المحاولة مجدداً."
@@ -57,8 +67,9 @@ function LoginForm() {
             "البريد الإلكتروني أو كلمة المرور غير صحيحة. يمكنك إنشاء حساب جديد أو استعادة كلمة المرور بالأسفل."
           );
         } else if (error.message.includes("Email not confirmed")) {
+          setUnconfirmedEmail(email.trim());
           throw new Error(
-            "يرجى تأكيد بريدك الإلكتروني أولاً عبر الرابط المرسل إلى صندوق الوارد الخاص بك (تفقد مجلد Spam)."
+            "بريدك الإلكتروني غير مفعّل بعد. أدخل رمز التحقق المكون من 6 أرقام المرسل لبريدك لتفعيله فوراً."
           );
         }
         throw error;
@@ -93,16 +104,105 @@ function LoginForm() {
 
       if (error) {
         if (error.message.includes("security purposes") || error.message.includes("rate limit")) {
-          throw new Error("يرجى الانتظار 60 ثانية قبل طلب رابط سحري جديد (حماية أمنية).");
+          throw new Error("يرجى الانتظار 60 ثانية قبل طلب رمز جديد (حماية أمنية).");
         }
         throw error;
       }
 
       setSentMagicLink(true);
     } catch (err: any) {
-      setErrorMsg(err.message || "حدث خطأ أثناء إرسال الرابط السحري");
+      setErrorMsg(err.message || "حدث خطأ أثناء إرسال رمز الدخول السريع");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanToken = otpCode.trim();
+    if (!cleanToken) return;
+
+    setVerifyingOtp(true);
+    setErrorMsg(null);
+
+    const targetEmail = (unconfirmedEmail || email).trim();
+
+    try {
+      // First try OTP type 'email' (for quick OTP login)
+      let { data, error } = await supabase.auth.verifyOtp({
+        email: targetEmail,
+        token: cleanToken,
+        type: "email",
+      });
+
+      // If not successful, try type 'signup' (in case the user is confirming a newly registered account)
+      if (error) {
+        const signupAttempt = await supabase.auth.verifyOtp({
+          email: targetEmail,
+          token: cleanToken,
+          type: "signup",
+        });
+        if (!signupAttempt.error && signupAttempt.data) {
+          data = signupAttempt.data;
+          error = null;
+        }
+      }
+
+      if (error) {
+        if (error.message.includes("Token has expired") || error.message.includes("invalid")) {
+          throw new Error("رمز التحقق غير صحيح أو انتهت صلاحيته. يرجى التأكد وإعادة المحاولة.");
+        }
+        throw error;
+      }
+
+      if (data?.user) {
+        router.push(returnUrl);
+        router.refresh();
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || "حدث خطأ أثناء التحقق من الرمز.");
+    } finally {
+      setVerifyingOtp(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    const targetEmail = (unconfirmedEmail || email).trim();
+    if (!targetEmail) return;
+
+    setResendingOtp(true);
+    setErrorMsg(null);
+    setResendSuccess(false);
+
+    try {
+      if (unconfirmedEmail) {
+        const { error } = await supabase.auth.resend({
+          type: "signup",
+          email: targetEmail,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signInWithOtp({
+          email: targetEmail,
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(
+              returnUrl
+            )}`,
+          },
+        });
+        if (error) throw error;
+      }
+
+      setResendSuccess(true);
+      setTimeout(() => setResendSuccess(false), 5000);
+    } catch (err: any) {
+      if (err.message.includes("security purposes") || err.message.includes("rate limit")) {
+        setErrorMsg("يرجى الانتظار 60 ثانية قبل طلب رمز جديد (حماية أمنية).");
+      } else {
+        setErrorMsg(err.message || "تعذر إعادة إرسال الرمز حالياً.");
+      }
+    } finally {
+      setResendingOtp(false);
     }
   };
 
@@ -135,6 +235,9 @@ function LoginForm() {
     }
   };
 
+  const isOtpStep = sentMagicLink || !!unconfirmedEmail;
+  const activeEmail = unconfirmedEmail || email;
+
   return (
     <div className="w-full max-w-md">
       {/* Brand Header */}
@@ -151,48 +254,111 @@ function LoginForm() {
           </span>
         </Link>
         <h1 className="text-xl font-bold text-slate-900 mt-4">
-          تسجيل الدخول إلى حسابك
+          {isOtpStep ? "تأكيد الدخول برمز التحقق" : "تسجيل الدخول إلى حسابك"}
         </h1>
         <p className="text-xs text-slate-500 mt-1">
-          رادار ذكي لرصد مشاريع العمل الحر وتوليد العروض فائق السرعة
+          {isOtpStep
+            ? `أدخل رمز التحقق المكون من 6 أرقام المرسل إلى ${activeEmail}`
+            : "رادار ذكي لرصد مشاريع العمل الحر وتوليد العروض فائق السرعة"}
         </p>
       </div>
 
       {/* Main Vollna Card */}
       <div className="vollna-card p-6 sm:p-8 bg-white border border-slate-200 shadow-xl shadow-slate-900/5 rounded-3xl">
-        {sentMagicLink ? (
-          <div className="text-center py-6 space-y-4">
+        {isOtpStep ? (
+          <div className="space-y-5">
             <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-200">
-              <CheckCircle2 className="w-8 h-8" />
+              <KeyRound className="w-7 h-7" />
             </div>
 
-            <div>
-              <h3 className="text-base font-bold text-slate-900 mb-1">
-                تحقق من بريدك الإلكتروني!
+            <div className="text-center">
+              <h3 className="text-base font-bold text-slate-900">
+                أدخل رمز التحقق (OTP)
               </h3>
-              <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto">
-                أرسلنا رابط تسجيل الدخول المباشر إلى{" "}
-                <span className="font-semibold text-slate-900 font-mono">
-                  {email}
+              <p className="text-xs text-slate-500 mt-1">
+                أرسلنا رمز تحقق مكوّن من 6 أرقام إلى{" "}
+                <span className="font-semibold text-slate-800 font-mono dir-ltr">
+                  {activeEmail}
                 </span>
-                . اضغط على الرابط في الرسالة للدخول فوراً.
               </p>
             </div>
 
-            {/* Spam Notice Box */}
-            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-700 text-xs text-right leading-relaxed">
-              <p className="text-[11px] text-slate-600">
-                💡 <strong>ملاحظة:</strong> إذا لم تجد الرسالة في صندوق الوارد خلال دقيقة، يرجى فحص مجلد <strong>الرسائل غير المرغوب فيها (Spam / Junk)</strong>.
-              </p>
-            </div>
+            {errorMsg && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2 animate-in fade-in duration-200">
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{errorMsg}</span>
+              </div>
+            )}
 
-            <div className="pt-2">
+            {resendSuccess && (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 animate-in fade-in duration-200">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>تم إرسال رمز تحقق جديد بنجاح!</span>
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyOtp} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-2 text-center">
+                  رمز التحقق المكون من 6 أرقام
+                </label>
+                <input
+                  type="text"
+                  required
+                  maxLength={8}
+                  autoFocus
+                  placeholder="123456"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\s+/g, ""))}
+                  className="w-full text-center text-2xl font-mono tracking-[10px] font-bold py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white transition"
+                />
+              </div>
+
+              {/* Spam Notice Box */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 text-xs leading-relaxed text-right">
+                <p className="text-[11px]">
+                  💡 <strong>ملاحظة:</strong> إذا لم تجد الرسالة في صندوق الوارد، يرجى فحص مجلد <strong>الرسائل غير المرغوب فيها (Spam / Junk)</strong>.
+                </p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={verifyingOtp || otpCode.trim().length < 6}
+                className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {verifyingOtp ? (
+                  <span>جاري التحقق من الرمز...</span>
+                ) : (
+                  <>
+                    <span>تأكيد الرمز وتسجيل الدخول</span>
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="pt-2 flex items-center justify-between text-xs border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setSentMagicLink(false)}
-                className="text-xs text-emerald-700 font-bold hover:underline transition"
+                onClick={handleResendOtp}
+                disabled={resendingOtp}
+                className="text-emerald-700 hover:underline font-bold flex items-center gap-1 disabled:opacity-50"
               >
-                تغيير البريد أو المحاولة بكلمة المرور
+                <RotateCcw className={`w-3.5 h-3.5 ${resendingOtp ? "animate-spin" : ""}`} />
+                <span>{resendingOtp ? "جاري الإرسال..." : "إعادة إرسال الرمز"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSentMagicLink(false);
+                  setUnconfirmedEmail(null);
+                  setOtpCode("");
+                  setErrorMsg(null);
+                }}
+                className="text-slate-500 hover:text-slate-800 transition"
+              >
+                الرجوع لتسجيل الدخول
               </button>
             </div>
           </div>
@@ -257,15 +423,30 @@ function LoginForm() {
                     : "text-slate-500 hover:text-slate-900"
                 }`}
               >
-                رابط تسجيل سحري
+                رمز الدخول السريع (OTP)
               </button>
             </div>
 
             {/* Error Message Box */}
             {errorMsg && (
-              <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
-                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                <span className="leading-relaxed">{errorMsg}</span>
+              <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex flex-col gap-2 animate-in fade-in duration-200">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">{errorMsg}</span>
+                </div>
+                {unconfirmedEmail && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSentMagicLink(true);
+                      setErrorMsg(null);
+                    }}
+                    className="self-start mt-1 py-1.5 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-xs"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>إدخال رمز التحقق لتفعيل الحساب الآن</span>
+                  </button>
+                )}
               </div>
             )}
 
@@ -366,11 +547,28 @@ function LoginForm() {
                   className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {loading ? (
-                    <span>جاري إرسال الرابط...</span>
+                    <span>جاري إرسال الرمز...</span>
                   ) : (
-                    <span>إرسال رابط تسجيل الدخول المباشر</span>
+                    <span>إرسال رمز الدخول السريع (OTP)</span>
                   )}
                 </button>
+
+                <div className="pt-1 text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!email) {
+                        setErrorMsg("يرجى كتابة البريد الإلكتروني أولاً ثم النقر هنا لإدخال الرمز.");
+                        return;
+                      }
+                      setSentMagicLink(true);
+                      setErrorMsg(null);
+                    }}
+                    className="text-xs text-emerald-700 hover:underline font-semibold"
+                  >
+                    لديك رمز تحقق بالفعل تم إرساله لبريدك؟ اضغط هنا لإدخاله
+                  </button>
+                </div>
               </form>
             )}
 

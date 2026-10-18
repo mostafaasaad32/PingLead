@@ -15,6 +15,8 @@ import {
   EyeOff,
   ShieldCheck,
   Zap,
+  KeyRound,
+  RotateCcw,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrEnsureFreelancerProfile } from "@/lib/supabase/profile";
@@ -23,14 +25,24 @@ function SignUpForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnUrl = searchParams.get("returnUrl") || "/dashboard";
+  const paramEmail = searchParams.get("email") || "";
+  const paramStep = searchParams.get("step") === "verify" ? "verify_otp" : "register";
 
+  // Form states
   const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(paramEmail);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [confirmNotice, setConfirmNotice] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // OTP Verification states
+  const [step, setStep] = useState<"register" | "verify_otp">(paramStep);
+  const [otpCode, setOtpCode] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
 
   const supabase = createClient();
 
@@ -70,7 +82,7 @@ function SignUpForm() {
       }
 
       if (data?.user) {
-        // If session exists immediately (e.g. email confirmation disabled or auto-confirmed)
+        // If session exists immediately (email confirmation disabled in Supabase)
         if (data.session) {
           await getOrEnsureFreelancerProfile(
             supabase,
@@ -81,16 +93,82 @@ function SignUpForm() {
           router.push(returnUrl);
           router.refresh();
         } else {
-          // Email confirmation is required by Supabase.
-          // The Postgres trigger on_auth_user_created_freelancer automatically creates
-          // the profile with 25 credits via SECURITY DEFINER in the database.
-          setConfirmNotice(true);
+          // Email confirmation is required by Supabase -> Transition to OTP code entry
+          setStep("verify_otp");
         }
       }
     } catch (err: any) {
       setErrorMsg(err.message || "حدث خطأ غير متوقع أثناء إنشاء الحساب");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanToken = otpCode.trim();
+    if (!cleanToken) return;
+
+    setVerifying(true);
+    setOtpError(null);
+
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: email.trim(),
+        token: cleanToken,
+        type: "signup",
+      });
+
+      if (error) {
+        if (error.message.includes("Token has expired") || error.message.includes("invalid")) {
+          throw new Error("رمز التحقق غير صحيح أو انتهت صلاحيته. يرجى التأكد وإعادة المحاولة.");
+        }
+        throw error;
+      }
+
+      if (data?.user) {
+        // Ensure freelancer profile with 25 credits
+        await getOrEnsureFreelancerProfile(
+          supabase,
+          data.user.id,
+          data.user.email,
+          fullName
+        );
+
+        router.push(returnUrl);
+        router.refresh();
+      }
+    } catch (err: any) {
+      setOtpError(err.message || "فشل التحقق من الرمز.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setResending(true);
+    setOtpError(null);
+    setResendSuccess(false);
+
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+      });
+
+      if (error) {
+        if (error.message.includes("security purposes") || error.message.includes("rate limit")) {
+          throw new Error("يرجى الانتظار 60 ثانية قبل طلب رمز جديد (حماية أمنية).");
+        }
+        throw error;
+      }
+
+      setResendSuccess(true);
+      setTimeout(() => setResendSuccess(false), 5000);
+    } catch (err: any) {
+      setOtpError(err.message || "تعذر إعادة إرسال الرمز حالياً.");
+    } finally {
+      setResending(false);
     }
   };
 
@@ -139,51 +217,113 @@ function SignUpForm() {
           </span>
         </Link>
         <h1 className="text-xl font-bold text-slate-900 mt-4">
-          إنشاء حساب جديد في الرادار
+          {step === "verify_otp" ? "تأكيد بريدك الإلكتروني" : "إنشاء حساب جديد في الرادار"}
         </h1>
         <p className="text-xs text-slate-500 mt-1">
-          احصل على رصيد 25 نقطة AI مجانية وفلترة ذكية لـ 9 منصات
+          {step === "verify_otp"
+            ? `أدخل رمز التحقق المكون من 6 أرقام المرسل إلى ${email}`
+            : "احصل على رصيد 25 نقطة AI مجانية وفلترة ذكية لـ 9 منصات"}
         </p>
       </div>
 
       {/* Main Vollna Card */}
       <div className="vollna-card p-6 sm:p-8 bg-white border border-slate-200 shadow-xl shadow-slate-900/5 rounded-3xl">
-        {confirmNotice ? (
-          <div className="text-center py-6 space-y-4">
+        {step === "verify_otp" ? (
+          /* Step 2: OTP Code Verification Screen */
+          <div className="space-y-5">
             <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-200">
-              <CheckCircle2 className="w-8 h-8" />
+              <KeyRound className="w-7 h-7" />
             </div>
 
-            <div>
-              <h3 className="text-base font-bold text-slate-900 mb-1">
-                تم إنشاء حسابك بنجاح!
+            <div className="text-center">
+              <h3 className="text-base font-bold text-slate-900">
+                أدخل رمز التحقق (OTP)
               </h3>
-              <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto">
-                أرسلنا رسالة تأكيد إلى بريدك الإلكتروني{" "}
-                <span className="font-semibold text-slate-900 font-mono">
-                  {email}
-                </span>
-                . يرجى الضغط على الرابط في الرسالة لتفعيل حسابك والدخول إلى الرادار.
+              <p className="text-xs text-slate-500 mt-1">
+                أرسلنا رمز تحقق إلى <span className="font-semibold text-slate-800 dir-ltr">{email}</span>
               </p>
             </div>
 
-            {/* Spam Notice Box */}
-            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-700 text-xs text-right leading-relaxed">
-              <p className="text-[11px] text-slate-600">
-                💡 <strong>ملاحظة:</strong> إذا لم تجد الرسالة في صندوق الوارد خلال دقيقة، يرجى فحص مجلد <strong>الرسائل غير المرغوب فيها (Spam / Junk)</strong>.
-              </p>
-            </div>
+            {otpError && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2 animate-in fade-in duration-200">
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{otpError}</span>
+              </div>
+            )}
 
-            <div className="pt-2">
-              <Link
-                href="/login"
-                className="inline-block py-2.5 px-6 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition"
+            {resendSuccess && (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 animate-in fade-in duration-200">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>تم إرسال رمز تحقق جديد إلى بريدك بنجاح!</span>
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyOtp} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-2 text-center">
+                  رمز التحقق المكون من 6 أرقام
+                </label>
+                <input
+                  type="text"
+                  required
+                  maxLength={8}
+                  autoFocus
+                  placeholder="123456"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\s+/g, ""))}
+                  className="w-full text-center text-2xl font-mono tracking-[10px] font-bold py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white transition"
+                />
+              </div>
+
+              {/* Spam Notice Box */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 text-xs leading-relaxed text-right">
+                <p className="text-[11px]">
+                  💡 <strong>ملاحظة:</strong> إذا لم تجد الرسالة في الوارد الرئيسي، يرجى فحص مجلد <strong>الرسائل غير المرغوب فيها (Spam / Junk)</strong>.
+                </p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={verifying || otpCode.trim().length < 6}
+                className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                الذهاب إلى صفحة الدخول
-              </Link>
+                {verifying ? (
+                  <span>جاري التحقق من الرمز...</span>
+                ) : (
+                  <>
+                    <span>تأكيد الرمز وتفعيل الحساب</span>
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="pt-2 flex items-center justify-between text-xs border-t border-slate-100">
+              <button
+                type="button"
+                onClick={handleResendOtp}
+                disabled={resending}
+                className="text-emerald-700 hover:underline font-bold flex items-center gap-1 disabled:opacity-50"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 ${resending ? "animate-spin" : ""}`} />
+                <span>{resending ? "جاري الإرسال..." : "إعادة إرسال الرمز"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setStep("register");
+                  setOtpCode("");
+                  setOtpError(null);
+                }}
+                className="text-slate-500 hover:text-slate-800 transition"
+              >
+                تعديل البيانات
+              </button>
             </div>
           </div>
         ) : (
+          /* Step 1: Registration Form */
           <>
             {/* Google OAuth Button */}
             <button
@@ -315,11 +455,28 @@ function SignUpForm() {
                   <span>جاري إنشاء الحساب...</span>
                 ) : (
                   <>
-                    <span>إنشاء الحساب وبدء الاستخدام</span>
+                    <span>إنشاء الحساب واستلام رمز التحقق</span>
                     <ArrowLeft className="w-3.5 h-3.5" />
                   </>
                 )}
               </button>
+
+              <div className="pt-2 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!email) {
+                      setErrorMsg("يرجى كتابة البريد الإلكتروني أولاً ثم النقر هنا لإدخال الرمز.");
+                      return;
+                    }
+                    setStep("verify_otp");
+                    setErrorMsg(null);
+                  }}
+                  className="text-xs text-emerald-700 hover:underline font-semibold"
+                >
+                  وصلك رمز التحقق بالفعل على بريدك؟ اضغط هنا لإدخاله فوراً
+                </button>
+              </div>
             </form>
 
             {/* Switch to Login */}
@@ -345,7 +502,7 @@ function SignUpForm() {
       {/* Trust Badge */}
       <div className="mt-6 text-center flex items-center justify-center gap-2 text-xs text-slate-400">
         <ShieldCheck className="w-4 h-4 text-emerald-600" />
-        <span>إنشاء الحساب مجاني ولا يتطلب بطاقة ائتمان</span>
+        <span>إنشاء الحساب مجاني ومحمي بأحدث معايير الأمان</span>
       </div>
     </div>
   );
