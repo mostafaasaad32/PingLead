@@ -30,6 +30,8 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sentMagicLink, setSentMagicLink] = useState(false);
+  const [directMagicLink, setDirectMagicLink] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(
     urlError === "auth_callback_failed"
       ? "تعذر التحقق من تسجيل الدخول بواسطة المزود الخارجي. يرجى المحاولة مجدداً."
@@ -45,12 +47,14 @@ function LoginForm() {
     setErrorMsg(null);
 
     try {
+      console.log(`[PingLead Client Log] Attempting password login for: ${email}`);
       const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
 
       if (error) {
+        console.error("[PingLead Client Log] Password login error:", error);
         if (
           error.message.includes("Invalid login credentials") ||
           error.message.includes("invalid_grant")
@@ -60,14 +64,14 @@ function LoginForm() {
           );
         } else if (error.message.includes("Email not confirmed")) {
           throw new Error(
-            "يرجى تأكيد بريدك الإلكتروني أولاً عبر الرابط المرسل إلى صندوق الوارد الخاص بك."
+            "يرجى تأكيد بريدك الإلكتروني أولاً عبر الرابط المرسل إلى صندوق الوارد الخاص بك (تفقد مجلد Spam)."
           );
         }
         throw error;
       }
 
       if (data?.user) {
-        // Successful login: redirect immediately to requested returnUrl or dashboard
+        console.log(`[PingLead Client Log] Login successful for: ${data.user.email}`);
         router.push(returnUrl);
         router.refresh();
       }
@@ -85,28 +89,45 @@ function LoginForm() {
     setErrorMsg(null);
 
     try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(
-            returnUrl
-          )}`,
-        },
+      console.log(`[PingLead Client Log] Requesting magic link via server for: ${email}`);
+      const res = await fetch("/api/auth/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), returnUrl }),
       });
 
-      if (error) throw error;
+      const data = await res.json();
+      console.log("[PingLead Client Log] Server magic link response:", data);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "تعذر إرسال الرابط السحري");
+      }
+
+      if (data.directLink) {
+        setDirectMagicLink(data.directLink);
+        console.log("🔗 [DIRECT LINK IN BROWSER CONSOLE]:", data.directLink);
+      }
       setSentMagicLink(true);
     } catch (err: any) {
+      console.error("[PingLead Client Log] Magic link error:", err);
       setErrorMsg(err.message || "حدث خطأ أثناء إرسال الرابط السحري");
     } finally {
       setLoading(false);
     }
   };
 
+  const handleCopyDirectLink = () => {
+    if (!directMagicLink) return;
+    navigator.clipboard.writeText(directMagicLink);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 3000);
+  };
+
   const handleGoogleLogin = async () => {
     setLoading(true);
     setErrorMsg(null);
     try {
+      console.log("[PingLead Client Log] Triggering Google OAuth...");
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -117,6 +138,7 @@ function LoginForm() {
       });
 
       if (error) {
+        console.error("[PingLead Client Log] Google OAuth error:", error);
         if (error.message.includes("not enabled")) {
           setErrorMsg(
             "تسجيل دخول Google غير مفعّل في إعدادات Supabase الحالية. يمكنك استخدام البريد وكلمة المرور فوراً."
@@ -158,27 +180,81 @@ function LoginForm() {
       {/* Main Vollna Card */}
       <div className="vollna-card p-6 sm:p-8 bg-white border border-slate-200 shadow-xl shadow-slate-900/5 rounded-3xl">
         {sentMagicLink ? (
-          <div className="text-center py-6">
-            <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4 border border-emerald-200">
+          <div className="text-center py-4 space-y-4">
+            <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-200">
               <CheckCircle2 className="w-8 h-8" />
             </div>
-            <h3 className="text-base font-bold text-slate-900 mb-2">
-              تحقق من بريدك الإلكتروني!
-            </h3>
-            <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto mb-6">
-              أرسلنا رابط تسجيل الدخول المباشر إلى{" "}
-              <span className="font-semibold text-slate-900 font-mono">
-                {email}
-              </span>
-              . اضغط على الرابط في الرسالة للدخول فوراً.
-            </p>
-            <button
-              type="button"
-              onClick={() => setSentMagicLink(false)}
-              className="text-xs text-emerald-700 font-bold hover:underline"
-            >
-              تغيير البريد أو المحاولة بكلمة المرور
-            </button>
+
+            <div>
+              <h3 className="text-base font-bold text-slate-900 mb-1">
+                تم توليد وإرسال رابط الدخول!
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto">
+                أرسلنا رسالة بالرابط إلى{" "}
+                <span className="font-semibold text-slate-900 font-mono">
+                  {email}
+                </span>
+                .
+              </p>
+            </div>
+
+            {/* Spam Notice Box */}
+            <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs text-right leading-relaxed space-y-1">
+              <div className="font-bold flex items-center gap-1.5 text-amber-800">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                <span>تنبيه هام حول صندوق الوارد:</span>
+              </div>
+              <p className="text-[11px] text-amber-700">
+                يتم إرسال الرسالة عبر خدمة Resend. إذا لم تجدها في الوارد الرئيسي، يرجى فحص مجلد <strong>الرسائل غير المرغوب فيها (Spam / Junk)</strong> أو الترويجية.
+              </p>
+            </div>
+
+            {/* Direct Action Link Box (Logged in Server Terminal & Available Here) */}
+            {directMagicLink && (
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-right space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-emerald-900 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-emerald-600" />
+                    <span>رابط الدخول المباشر (سجل الخادم Log):</span>
+                  </span>
+                  <span className="text-[10px] bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                    جاهز فوراً
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-700 leading-relaxed">
+                  تم تسجيل وطباعة الرابط المباشر في الـ Server Terminal. يمكنك الدخول فوراً بالضغط على الزر أدناه دون انتظار الإيميل:
+                </p>
+                <div className="flex flex-col gap-2 pt-1">
+                  <a
+                    href={directMagicLink}
+                    className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition shadow-md shadow-emerald-600/20"
+                  >
+                    <span>الدخول الفوري إلى لوحة التحكم الآن</span>
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={handleCopyDirectLink}
+                    className="w-full py-1.5 px-3 rounded-lg border border-emerald-300 text-emerald-800 hover:bg-emerald-100 text-[11px] font-semibold transition"
+                  >
+                    {copiedLink ? "✓ تم نسخ الرابط المباشر!" : "نسخ الرابط المباشر"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSentMagicLink(false);
+                  setDirectMagicLink(null);
+                }}
+                className="text-xs text-slate-500 font-bold hover:text-slate-800 underline transition"
+              >
+                المحاولة ببريد آخر أو بكلمة المرور
+              </button>
+            </div>
           </div>
         ) : (
           <>

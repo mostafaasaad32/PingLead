@@ -31,6 +31,8 @@ function SignUpForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [confirmNotice, setConfirmNotice] = useState(false);
+  const [directConfirmLink, setDirectConfirmLink] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const supabase = createClient();
@@ -48,6 +50,7 @@ function SignUpForm() {
     setErrorMsg(null);
 
     try {
+      console.log(`[PingLead Client Log] Signing up new user: ${email}`);
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
@@ -62,6 +65,7 @@ function SignUpForm() {
       });
 
       if (error) {
+        console.error("[PingLead Client Log] Sign up error:", error);
         if (error.message.includes("User already registered")) {
           throw new Error(
             "هذا البريد الإلكتروني مسجل بالفعل. يمكنك تسجيل الدخول مباشرة بدلاً من إنشاء حساب جديد."
@@ -81,10 +85,26 @@ function SignUpForm() {
 
         // If session exists immediately (email confirmation disabled or auto-confirmed)
         if (data.session) {
+          console.log(`[PingLead Client Log] Auto-confirmed session active for: ${data.user.email}`);
           router.push(returnUrl);
           router.refresh();
         } else {
           // Email confirmation is required by Supabase
+          console.log(`[PingLead Client Log] Email confirmation requested. Fetching direct server log link...`);
+          try {
+            const linkRes = await fetch("/api/auth/signup-link", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email: email.trim(), returnUrl }),
+            });
+            const linkData = await linkRes.json();
+            if (linkData.ok && linkData.directLink) {
+              setDirectConfirmLink(linkData.directLink);
+              console.log("🔗 [DIRECT CONFIRM LINK IN CONSOLE]:", linkData.directLink);
+            }
+          } catch (le) {
+            console.warn("Could not retrieve direct signup link:", le);
+          }
           setConfirmNotice(true);
         }
       }
@@ -93,6 +113,13 @@ function SignUpForm() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCopyDirectLink = () => {
+    if (!directConfirmLink) return;
+    navigator.clipboard.writeText(directConfirmLink);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 3000);
   };
 
   const handleGoogleSignUp = async () => {
@@ -150,26 +177,77 @@ function SignUpForm() {
       {/* Main Vollna Card */}
       <div className="vollna-card p-6 sm:p-8 bg-white border border-slate-200 shadow-xl shadow-slate-900/5 rounded-3xl">
         {confirmNotice ? (
-          <div className="text-center py-6">
-            <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4 border border-emerald-200">
+          <div className="text-center py-4 space-y-4">
+            <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-200">
               <CheckCircle2 className="w-8 h-8" />
             </div>
-            <h3 className="text-base font-bold text-slate-900 mb-2">
-              تم إنشاء حسابك بنجاح!
-            </h3>
-            <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto mb-6">
-              أرسلنا رسالة تأكيد إلى بريدك الإلكتروني{" "}
-              <span className="font-semibold text-slate-900 font-mono">
-                {email}
-              </span>
-              . يرجى الضغط على الرابط في الرسالة لتفعيل حسابك والدخول إلى الرادار.
-            </p>
-            <Link
-              href="/login"
-              className="inline-block py-2.5 px-6 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition"
-            >
-              الذهاب إلى صفحة الدخول
-            </Link>
+
+            <div>
+              <h3 className="text-base font-bold text-slate-900 mb-1">
+                تم إنشاء حسابك بنجاح!
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto">
+                أرسلنا رسالة تأكيد إلى بريدك الإلكتروني{" "}
+                <span className="font-semibold text-slate-900 font-mono">
+                  {email}
+                </span>
+                .
+              </p>
+            </div>
+
+            {/* Spam Notice Box */}
+            <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs text-right leading-relaxed space-y-1">
+              <div className="font-bold flex items-center gap-1.5 text-amber-800">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                <span>تنبيه هام حول صندوق الوارد:</span>
+              </div>
+              <p className="text-[11px] text-amber-700">
+                يتم إرسال الرسالة عبر خدمة Resend. إذا لم تجدها في الوارد الرئيسي، يرجى فحص مجلد <strong>الرسائل غير المرغوب فيها (Spam / Junk)</strong>.
+              </p>
+            </div>
+
+            {/* Direct Action Link Box (Logged in Server Terminal & Available Here) */}
+            {directConfirmLink && (
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-right space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-emerald-900 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-emerald-600" />
+                    <span>رابط التأكيد المباشر (سجل الخادم Log):</span>
+                  </span>
+                  <span className="text-[10px] bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                    جاهز فوراً
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-700 leading-relaxed">
+                  تم تسجيل رابط التأكيد في الـ Server Terminal. يمكنك تفعيل حسابك فوراً والدخول بالضغط أدناه:
+                </p>
+                <div className="flex flex-col gap-2 pt-1">
+                  <a
+                    href={directConfirmLink}
+                    className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition shadow-md shadow-emerald-600/20"
+                  >
+                    <span>تأكيد الحساب والدخول إلى لوحة التحكم فوراً</span>
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={handleCopyDirectLink}
+                    className="w-full py-1.5 px-3 rounded-lg border border-emerald-300 text-emerald-800 hover:bg-emerald-100 text-[11px] font-semibold transition"
+                  >
+                    {copiedLink ? "✓ تم نسخ الرابط المباشر!" : "نسخ الرابط المباشر"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="pt-2">
+              <Link
+                href="/login"
+                className="inline-block py-2.5 px-6 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition"
+              >
+                الذهاب إلى صفحة الدخول
+              </Link>
+            </div>
           </div>
         ) : (
           <>
