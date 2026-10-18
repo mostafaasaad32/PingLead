@@ -35,6 +35,7 @@ function SignUpForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isEmailDuplicate, setIsEmailDuplicate] = useState(false);
 
   // OTP Verification states
   const [step, setStep] = useState<"register" | "verify_otp">(paramStep);
@@ -57,6 +58,7 @@ function SignUpForm() {
 
     setLoading(true);
     setErrorMsg(null);
+    setIsEmailDuplicate(false);
 
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -73,15 +75,31 @@ function SignUpForm() {
       });
 
       if (error) {
-        if (error.message.includes("User already registered")) {
+        const msg = error.message.toLowerCase();
+        if (
+          msg.includes("user already registered") ||
+          msg.includes("already registered") ||
+          msg.includes("already in use") ||
+          msg.includes("already exists") ||
+          error.status === 422
+        ) {
+          setIsEmailDuplicate(true);
           throw new Error(
-            "هذا البريد الإلكتروني مسجل بالفعل. يمكنك تسجيل الدخول مباشرة بدلاً من إنشاء حساب جديد."
+            "هذا البريد الإلكتروني مسجل بالفعل لدى مستخدم آخر. يرجى تسجيل الدخول بحسابك أو استخدام بريد إلكتروني مختلف."
           );
         }
         throw error;
       }
 
       if (data?.user) {
+        // If email enumeration protection is ON, Supabase returns identities: [] for duplicate emails
+        if (Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+          setIsEmailDuplicate(true);
+          throw new Error(
+            "هذا البريد الإلكتروني مسجل بالفعل لدى مستخدم آخر. يرجى تسجيل الدخول بحسابك أو استخدام بريد إلكتروني مختلف."
+          );
+        }
+
         // If session exists immediately (email confirmation disabled in Supabase)
         if (data.session) {
           await getOrEnsureFreelancerProfile(
@@ -364,9 +382,39 @@ function SignUpForm() {
 
             {/* Error Message Box */}
             {errorMsg && (
-              <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
-                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                <span className="leading-relaxed">{errorMsg}</span>
+              <div
+                className={`mb-4 p-3.5 rounded-2xl text-xs flex flex-col gap-2.5 animate-in fade-in duration-200 ${
+                  isEmailDuplicate
+                    ? "bg-amber-50 border border-amber-200 text-amber-900"
+                    : "bg-red-50 border border-red-200 text-red-700"
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle
+                    className={`w-4 h-4 shrink-0 mt-0.5 ${
+                      isEmailDuplicate ? "text-amber-600" : "text-red-600"
+                    }`}
+                  />
+                  <span className="leading-relaxed font-semibold">{errorMsg}</span>
+                </div>
+
+                {isEmailDuplicate && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-amber-200/80">
+                    <Link
+                      href={`/login?email=${encodeURIComponent(email)}`}
+                      className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-[11px] transition shadow-xs"
+                    >
+                      <span>الانتقال لتسجيل الدخول مباشرة</span>
+                      <ArrowLeft className="w-3 h-3" />
+                    </Link>
+                    <Link
+                      href="/forgot-password"
+                      className="text-[11px] text-amber-900 hover:underline font-bold mr-auto"
+                    >
+                      استعادة كلمة المرور
+                    </Link>
+                  </div>
+                )}
               </div>
             )}
 
@@ -398,8 +446,16 @@ function SignUpForm() {
                     required
                     placeholder="name@example.com"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white text-left dir-ltr transition"
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (isEmailDuplicate) {
+                        setIsEmailDuplicate(false);
+                        setErrorMsg(null);
+                      }
+                    }}
+                    className={`w-full pl-3 pr-10 py-2.5 bg-slate-50 border rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white text-left dir-ltr transition ${
+                      isEmailDuplicate ? "border-amber-400 ring-2 ring-amber-100" : "border-slate-200"
+                    }`}
                   />
                   <Mail className="w-4 h-4 text-slate-400 absolute right-3 top-3 pointer-events-none" />
                 </div>
