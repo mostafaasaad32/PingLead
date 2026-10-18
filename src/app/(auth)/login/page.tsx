@@ -8,13 +8,11 @@ import {
   Mail,
   Lock,
   ArrowLeft,
-  CheckCircle2,
   AlertCircle,
   Eye,
   EyeOff,
   ShieldCheck,
   KeyRound,
-  RotateCcw,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -26,16 +24,8 @@ function LoginForm() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"password" | "magic_link">("password");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  
-  // OTP Verification state
-  const [sentMagicLink, setSentMagicLink] = useState(false);
-  const [otpCode, setOtpCode] = useState("");
-  const [verifyingOtp, setVerifyingOtp] = useState(false);
-  const [resendingOtp, setResendingOtp] = useState(false);
-  const [resendSuccess, setResendSuccess] = useState(false);
   const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
 
   const [errorMsg, setErrorMsg] = useState<string | null>(
@@ -51,6 +41,7 @@ function LoginForm() {
     if (!email || !password) return;
     setLoading(true);
     setErrorMsg(null);
+    setUnconfirmedEmail(null);
 
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -69,7 +60,7 @@ function LoginForm() {
         } else if (error.message.includes("Email not confirmed")) {
           setUnconfirmedEmail(email.trim());
           throw new Error(
-            "بريدك الإلكتروني غير مفعّل بعد. أدخل رمز التحقق المكون من 6 أرقام المرسل لبريدك لتفعيله فوراً."
+            "بريدك الإلكتروني غير مفعّل بعد. يرجى إدخال رمز التحقق لتفعيل حسابك والدخول."
           );
         }
         throw error;
@@ -83,126 +74,6 @@ function LoginForm() {
       setErrorMsg(err.message || "حدث خطأ أثناء تسجيل الدخول");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleMagicLink = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email) return;
-    setLoading(true);
-    setErrorMsg(null);
-
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(
-            returnUrl
-          )}`,
-        },
-      });
-
-      if (error) {
-        if (error.message.includes("security purposes") || error.message.includes("rate limit")) {
-          throw new Error("يرجى الانتظار 60 ثانية قبل طلب رمز جديد (حماية أمنية).");
-        }
-        throw error;
-      }
-
-      setSentMagicLink(true);
-    } catch (err: any) {
-      setErrorMsg(err.message || "حدث خطأ أثناء إرسال رمز الدخول السريع");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanToken = otpCode.trim();
-    if (!cleanToken) return;
-
-    setVerifyingOtp(true);
-    setErrorMsg(null);
-
-    const targetEmail = (unconfirmedEmail || email).trim();
-
-    try {
-      // First try OTP type 'email' (for quick OTP login)
-      let { data, error } = await supabase.auth.verifyOtp({
-        email: targetEmail,
-        token: cleanToken,
-        type: "email",
-      });
-
-      // If not successful, try type 'signup' (in case the user is confirming a newly registered account)
-      if (error) {
-        const signupAttempt = await supabase.auth.verifyOtp({
-          email: targetEmail,
-          token: cleanToken,
-          type: "signup",
-        });
-        if (!signupAttempt.error && signupAttempt.data) {
-          data = signupAttempt.data;
-          error = null;
-        }
-      }
-
-      if (error) {
-        if (error.message.includes("Token has expired") || error.message.includes("invalid")) {
-          throw new Error("رمز التحقق غير صحيح أو انتهت صلاحيته. يرجى التأكد وإعادة المحاولة.");
-        }
-        throw error;
-      }
-
-      if (data?.user) {
-        router.push(returnUrl);
-        router.refresh();
-      }
-    } catch (err: any) {
-      setErrorMsg(err.message || "حدث خطأ أثناء التحقق من الرمز.");
-    } finally {
-      setVerifyingOtp(false);
-    }
-  };
-
-  const handleResendOtp = async () => {
-    const targetEmail = (unconfirmedEmail || email).trim();
-    if (!targetEmail) return;
-
-    setResendingOtp(true);
-    setErrorMsg(null);
-    setResendSuccess(false);
-
-    try {
-      if (unconfirmedEmail) {
-        const { error } = await supabase.auth.resend({
-          type: "signup",
-          email: targetEmail,
-        });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.auth.signInWithOtp({
-          email: targetEmail,
-          options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(
-              returnUrl
-            )}`,
-          },
-        });
-        if (error) throw error;
-      }
-
-      setResendSuccess(true);
-      setTimeout(() => setResendSuccess(false), 5000);
-    } catch (err: any) {
-      if (err.message.includes("security purposes") || err.message.includes("rate limit")) {
-        setErrorMsg("يرجى الانتظار 60 ثانية قبل طلب رمز جديد (حماية أمنية).");
-      } else {
-        setErrorMsg(err.message || "تعذر إعادة إرسال الرمز حالياً.");
-      }
-    } finally {
-      setResendingOtp(false);
     }
   };
 
@@ -235,9 +106,6 @@ function LoginForm() {
     }
   };
 
-  const isOtpStep = sentMagicLink || !!unconfirmedEmail;
-  const activeEmail = unconfirmedEmail || email;
-
   return (
     <div className="w-full max-w-md">
       {/* Brand Header */}
@@ -254,342 +122,162 @@ function LoginForm() {
           </span>
         </Link>
         <h1 className="text-xl font-bold text-slate-900 mt-4">
-          {isOtpStep ? "تأكيد الدخول برمز التحقق" : "تسجيل الدخول إلى حسابك"}
+          تسجيل الدخول إلى حسابك
         </h1>
         <p className="text-xs text-slate-500 mt-1">
-          {isOtpStep
-            ? `أدخل رمز التحقق المكون من 6 أرقام المرسل إلى ${activeEmail}`
-            : "رادار ذكي لرصد مشاريع العمل الحر وتوليد العروض فائق السرعة"}
+          رادار ذكي لرصد مشاريع العمل الحر وتوليد العروض فائق السرعة
         </p>
       </div>
 
       {/* Main Vollna Card */}
       <div className="vollna-card p-6 sm:p-8 bg-white border border-slate-200 shadow-xl shadow-slate-900/5 rounded-3xl">
-        {isOtpStep ? (
-          <div className="space-y-5">
-            <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-200">
-              <KeyRound className="w-7 h-7" />
+        {/* Google OAuth Button */}
+        <button
+          type="button"
+          onClick={handleGoogleLogin}
+          disabled={loading}
+          className="w-full py-2.5 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center justify-center gap-3 transition shadow-xs disabled:opacity-50"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24">
+            <path
+              fill="#4285F4"
+              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+            />
+            <path
+              fill="#34A853"
+              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+            />
+            <path
+              fill="#FBBC05"
+              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+            />
+            <path
+              fill="#EA4335"
+              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+            />
+          </svg>
+          <span>المتابعة عبر حساب Google</span>
+        </button>
+
+        {/* Divider */}
+        <div className="flex items-center gap-3 my-5">
+          <div className="flex-1 border-t border-slate-200" />
+          <span className="text-[11px] text-slate-400 font-medium">
+            أو بالبريد الإلكتروني
+          </span>
+          <div className="flex-1 border-t border-slate-200" />
+        </div>
+
+        {/* Error Message Box */}
+        {errorMsg && (
+          <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex flex-col gap-2 animate-in fade-in duration-200">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <span className="leading-relaxed">{errorMsg}</span>
             </div>
-
-            <div className="text-center">
-              <h3 className="text-base font-bold text-slate-900">
-                أدخل رمز التحقق (OTP)
-              </h3>
-              <p className="text-xs text-slate-500 mt-1">
-                أرسلنا رمز تحقق مكوّن من 6 أرقام إلى{" "}
-                <span className="font-semibold text-slate-800 font-mono dir-ltr">
-                  {activeEmail}
-                </span>
-              </p>
-            </div>
-
-            {errorMsg && (
-              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2 animate-in fade-in duration-200">
-                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                <span className="leading-relaxed">{errorMsg}</span>
-              </div>
-            )}
-
-            {resendSuccess && (
-              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 animate-in fade-in duration-200">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>تم إرسال رمز تحقق جديد بنجاح!</span>
-              </div>
-            )}
-
-            <form onSubmit={handleVerifyOtp} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-2 text-center">
-                  رمز التحقق المكون من 6 أرقام
-                </label>
-                <input
-                  type="text"
-                  required
-                  maxLength={8}
-                  autoFocus
-                  placeholder="123456"
-                  value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value.replace(/\s+/g, ""))}
-                  className="w-full text-center text-2xl font-mono tracking-[10px] font-bold py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white transition"
-                />
-              </div>
-
-              {/* Spam Notice Box */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 text-xs leading-relaxed text-right">
-                <p className="text-[11px]">
-                  💡 <strong>ملاحظة:</strong> إذا لم تجد الرسالة في صندوق الوارد، يرجى فحص مجلد <strong>الرسائل غير المرغوب فيها (Spam / Junk)</strong>.
-                </p>
-              </div>
-
-              <button
-                type="submit"
-                disabled={verifyingOtp || otpCode.trim().length < 6}
-                className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50"
+            {unconfirmedEmail && (
+              <Link
+                href={`/signup?email=${encodeURIComponent(
+                  unconfirmedEmail
+                )}&step=verify`}
+                className="self-start mt-1 py-1.5 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-xs"
               >
-                {verifyingOtp ? (
-                  <span>جاري التحقق من الرمز...</span>
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>إدخال رمز التحقق لتفعيل الحساب الآن</span>
+              </Link>
+            )}
+          </div>
+        )}
+
+        {/* Password Login Form */}
+        <form onSubmit={handlePasswordLogin} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              البريد الإلكتروني
+            </label>
+            <div className="relative">
+              <input
+                type="email"
+                required
+                placeholder="name@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white text-left dir-ltr transition"
+              />
+              <Mail className="w-4 h-4 text-slate-400 absolute right-3 top-3 pointer-events-none" />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-bold text-slate-700">
+                كلمة المرور
+              </label>
+              <Link
+                href="/forgot-password"
+                className="text-[11px] text-emerald-700 hover:underline font-semibold"
+              >
+                نسيت كلمة المرور؟
+              </Link>
+            </div>
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                required
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white text-left dir-ltr transition"
+              />
+              <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-3 pointer-events-none" />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute left-3 top-3 text-slate-400 hover:text-slate-600 transition"
+                aria-label="Toggle password visibility"
+              >
+                {showPassword ? (
+                  <EyeOff className="w-4 h-4" />
                 ) : (
-                  <>
-                    <span>تأكيد الرمز وتسجيل الدخول</span>
-                    <ArrowLeft className="w-3.5 h-3.5" />
-                  </>
+                  <Eye className="w-4 h-4" />
                 )}
-              </button>
-            </form>
-
-            <div className="pt-2 flex items-center justify-between text-xs border-t border-slate-100">
-              <button
-                type="button"
-                onClick={handleResendOtp}
-                disabled={resendingOtp}
-                className="text-emerald-700 hover:underline font-bold flex items-center gap-1 disabled:opacity-50"
-              >
-                <RotateCcw className={`w-3.5 h-3.5 ${resendingOtp ? "animate-spin" : ""}`} />
-                <span>{resendingOtp ? "جاري الإرسال..." : "إعادة إرسال الرمز"}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setSentMagicLink(false);
-                  setUnconfirmedEmail(null);
-                  setOtpCode("");
-                  setErrorMsg(null);
-                }}
-                className="text-slate-500 hover:text-slate-800 transition"
-              >
-                الرجوع لتسجيل الدخول
               </button>
             </div>
           </div>
-        ) : (
-          <>
-            {/* Google OAuth Button */}
-            <button
-              type="button"
-              onClick={handleGoogleLogin}
-              disabled={loading}
-              className="w-full py-2.5 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs flex items-center justify-center gap-3 transition shadow-xs disabled:opacity-50"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24">
-                <path
-                  fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                />
-              </svg>
-              <span>المتابعة عبر حساب Google</span>
-            </button>
 
-            {/* Divider */}
-            <div className="flex items-center gap-3 my-5">
-              <div className="flex-1 border-t border-slate-200" />
-              <span className="text-[11px] text-slate-400 font-medium">
-                أو بالبريد الإلكتروني
-              </span>
-              <div className="flex-1 border-t border-slate-200" />
-            </div>
-
-            {/* Mode Switcher Tabs */}
-            <div className="flex items-center p-1 rounded-xl bg-slate-100 border border-slate-200/80 mb-4">
-              <button
-                type="button"
-                onClick={() => setMode("password")}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition ${
-                  mode === "password"
-                    ? "bg-white text-slate-900 shadow-xs"
-                    : "text-slate-500 hover:text-slate-900"
-                }`}
-              >
-                كلمة المرور
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("magic_link")}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition ${
-                  mode === "magic_link"
-                    ? "bg-white text-slate-900 shadow-xs"
-                    : "text-slate-500 hover:text-slate-900"
-                }`}
-              >
-                رمز الدخول السريع (OTP)
-              </button>
-            </div>
-
-            {/* Error Message Box */}
-            {errorMsg && (
-              <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex flex-col gap-2 animate-in fade-in duration-200">
-                <div className="flex items-start gap-2.5">
-                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                  <span className="leading-relaxed">{errorMsg}</span>
-                </div>
-                {unconfirmedEmail && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSentMagicLink(true);
-                      setErrorMsg(null);
-                    }}
-                    className="self-start mt-1 py-1.5 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-xs"
-                  >
-                    <KeyRound className="w-3.5 h-3.5" />
-                    <span>إدخال رمز التحقق لتفعيل الحساب الآن</span>
-                  </button>
-                )}
-              </div>
-            )}
-
-            {mode === "password" ? (
-              <form onSubmit={handlePasswordLogin} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    البريد الإلكتروني
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="email"
-                      required
-                      placeholder="name@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white text-left dir-ltr transition"
-                    />
-                    <Mail className="w-4 h-4 text-slate-400 absolute right-3 top-3 pointer-events-none" />
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-bold text-slate-700">
-                      كلمة المرور
-                    </label>
-                    <Link
-                      href="/forgot-password"
-                      className="text-[11px] text-emerald-700 hover:underline font-semibold"
-                    >
-                      نسيت كلمة المرور؟
-                    </Link>
-                  </div>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      required
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white text-left dir-ltr transition"
-                    />
-                    <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-3 pointer-events-none" />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute left-3 top-3 text-slate-400 hover:text-slate-600 transition"
-                      aria-label="Toggle password visibility"
-                    >
-                      {showPassword ? (
-                        <EyeOff className="w-4 h-4" />
-                      ) : (
-                        <Eye className="w-4 h-4" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Primary Button */}
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50 mt-2"
-                >
-                  {loading ? (
-                    <span>جاري تسجيل الدخول...</span>
-                  ) : (
-                    <>
-                      <span>تسجيل الدخول</span>
-                      <ArrowLeft className="w-3.5 h-3.5" />
-                    </>
-                  )}
-                </button>
-              </form>
+          {/* Primary Button */}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50 mt-2"
+          >
+            {loading ? (
+              <span>جاري تسجيل الدخول...</span>
             ) : (
-              <form onSubmit={handleMagicLink} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    البريد الإلكتروني
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="email"
-                      required
-                      placeholder="name@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white text-left dir-ltr transition"
-                    />
-                    <Mail className="w-4 h-4 text-slate-400 absolute right-3 top-3 pointer-events-none" />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {loading ? (
-                    <span>جاري إرسال الرمز...</span>
-                  ) : (
-                    <span>إرسال رمز الدخول السريع (OTP)</span>
-                  )}
-                </button>
-
-                <div className="pt-1 text-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!email) {
-                        setErrorMsg("يرجى كتابة البريد الإلكتروني أولاً ثم النقر هنا لإدخال الرمز.");
-                        return;
-                      }
-                      setSentMagicLink(true);
-                      setErrorMsg(null);
-                    }}
-                    className="text-xs text-emerald-700 hover:underline font-semibold"
-                  >
-                    لديك رمز تحقق بالفعل تم إرساله لبريدك؟ اضغط هنا لإدخاله
-                  </button>
-                </div>
-              </form>
+              <>
+                <span>تسجيل الدخول</span>
+                <ArrowLeft className="w-3.5 h-3.5" />
+              </>
             )}
+          </button>
+        </form>
 
-            {/* Switch to Sign Up */}
-            <div className="mt-6 pt-5 border-t border-slate-100 text-center">
-              <p className="text-xs text-slate-600">
-                ليس لديك حساب بعد؟{" "}
-                <Link
-                  href={`/signup${
-                    returnUrl !== "/dashboard"
-                      ? `?returnUrl=${encodeURIComponent(returnUrl)}`
-                      : ""
-                  }`}
-                  className="text-emerald-700 font-extrabold hover:underline"
-                >
-                  أنشئ حسابك مجاناً واحصل على 25 نقطة
-                </Link>
-              </p>
-            </div>
-          </>
-        )}
+        {/* Switch to Sign Up */}
+        <div className="mt-6 pt-5 border-t border-slate-100 text-center">
+          <p className="text-xs text-slate-600">
+            ليس لديك حساب بعد؟{" "}
+            <Link
+              href={`/signup${
+                returnUrl !== "/dashboard"
+                  ? `?returnUrl=${encodeURIComponent(returnUrl)}`
+                  : ""
+              }`}
+              className="text-emerald-700 font-extrabold hover:underline"
+            >
+              أنشئ حسابك مجاناً واحصل على 25 نقطة
+            </Link>
+          </p>
+        </div>
       </div>
 
       {/* Trust Badge */}
