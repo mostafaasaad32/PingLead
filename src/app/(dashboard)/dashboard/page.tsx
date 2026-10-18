@@ -29,7 +29,15 @@ import {
   FileText,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { PLATFORMS_METADATA, CATEGORIES_METADATA } from "@/lib/scrapers/types";
+import {
+  PLATFORMS_METADATA,
+  CATEGORIES_METADATA,
+  type ProjectInsights,
+  extractTitleFromPostText,
+  extractDetailsFromPostText,
+} from "@/lib/scrapers/types";
+import { getCompetitionVerdict, getClientVerdict } from "@/lib/insights/competition";
+import type { ProjectPricing } from "@/lib/insights/pricing";
 import { isCategoryMatch } from "@/lib/filters/categorizer";
 
 interface Lead {
@@ -45,6 +53,70 @@ interface Lead {
   ai_reason_short?: string;
   status?: string;
   published_at: string;
+  insights?: ProjectInsights | null;
+  pricing?: ProjectPricing | null;
+}
+
+const COMPETITION_CHIP_STYLES: Record<string, string> = {
+  low: "bg-emerald-50 text-emerald-800 border-emerald-200/70",
+  medium: "bg-amber-50 text-amber-800 border-amber-200/70",
+  high: "bg-red-50 text-red-700 border-red-200/70",
+};
+
+const CLIENT_CHIP_STYLES: Record<string, string> = {
+  good: "bg-emerald-50 text-emerald-800 border-emerald-200/70",
+  medium: "bg-slate-50 text-slate-700 border-slate-200",
+  low: "bg-red-50 text-red-700 border-red-200/70",
+  new: "bg-sky-50 text-sky-800 border-sky-200/70",
+  unknown: "bg-slate-50 text-slate-700 border-slate-200",
+};
+
+function InsightChips({
+  insights,
+  pricing,
+}: {
+  insights?: ProjectInsights | null;
+  pricing?: ProjectPricing | null;
+}) {
+  const suggestion = pricing?.suggestion;
+  if (!insights && !suggestion) return null;
+  const competition = getCompetitionVerdict(insights || {});
+  const client = getClientVerdict(insights || {});
+  const clientText = [client.label, ...client.details].filter(Boolean).join(" · ");
+
+  if (competition.level === "unknown" && !clientText && !insights?.duration_text && !suggestion) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mb-3">
+      {suggestion && (
+        <span
+          className="text-[11px] font-bold px-2 py-0.5 rounded-md border bg-violet-50 text-violet-800 border-violet-200/70"
+          title={suggestion.reasons.join(" · ")}
+        >
+          💡 مقترح: {suggestion.priceUsd}$
+          {suggestion.priceEgpText ? ` (${suggestion.priceEgpText})` : ""} في {suggestion.daysText}
+        </span>
+      )}
+      {competition.level !== "unknown" && (
+        <span
+          className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${COMPETITION_CHIP_STYLES[competition.level]}`}
+          title={insights?.bids_avg ? `متوسط العروض $${insights.bids_avg}` : undefined}
+        >
+          {competition.emoji} {competition.label} · {competition.advice}
+        </span>
+      )}
+      {clientText && (
+        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${CLIENT_CHIP_STYLES[client.level]}`}>
+          {client.emoji} {clientText}
+        </span>
+      )}
+      {insights?.duration_text && (
+        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md border bg-slate-50 text-slate-700 border-slate-200">
+          ⏳ {insights.duration_text}
+        </span>
+      )}
+    </div>
+  );
 }
 
 interface TrackedProjectAction {
@@ -221,9 +293,7 @@ export default function DashboardPage() {
   const handleScanNow = async () => {
     setScanning(true);
     try {
-      const res = await fetch(
-        "/api/cron/ingest?secret=pinglead_cron_secret_secure_9921&scrape=true"
-      );
+      const res = await fetch("/api/scan", { method: "POST" });
       const data = await res.json();
       if (data.ok) {
         showToast("اكتمل سحب وتحديث المشاريع من 20 منصة بنجاح!");
@@ -321,8 +391,8 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           lead_id: lead.id,
-          project_title: lead.post_text.split("\n")[0] || "مشروع عمل حر",
-          project_description: lead.post_text,
+          project_title: extractTitleFromPostText(lead.post_text) || "مشروع عمل حر",
+          project_description: extractDetailsFromPostText(lead.post_text),
         }),
       });
 
@@ -371,7 +441,7 @@ export default function DashboardPage() {
 
     const headers = ["المنصة", "عنوان المشروع", "الميزانية", "تاريخ النشر", "رابط المشروع", "الحالة"];
     const rows = listToExport.map((l) => {
-      const firstLine = l.post_text.split("\n")[0].replace(/"/g, '""');
+      const firstLine = extractTitleFromPostText(l.post_text).replace(/"/g, '""');
       const budget = extractBudgetBadge(l.post_text) || "";
       const status = trackedActions[l.id]?.status || "new";
       return [
@@ -641,7 +711,7 @@ export default function DashboardPage() {
               {filteredLeads.map((lead) => {
                 const dateInfo = formatLeadDate(lead.published_at);
                 const budgetBadge = extractBudgetBadge(lead.post_text);
-                const firstLine = lead.post_text.split("\n")[0].replace(/\[.*?\]/g, "").trim();
+                const firstLine = extractTitleFromPostText(lead.post_text);
                 const action = trackedActions[lead.id];
                 const isSaved = action?.status === "saved";
                 const isApplied = action?.status === "applied";
@@ -660,7 +730,10 @@ export default function DashboardPage() {
 
                         {budgetBadge && (
                           <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60">
-                            {budgetBadge}
+                            <bdi dir="ltr">{budgetBadge}</bdi>
+                            {lead.pricing?.budgetEgpText && (
+                              <span className="font-semibold text-emerald-700/80"> · {lead.pricing.budgetEgpText}</span>
+                            )}
                           </span>
                         )}
 
@@ -704,9 +777,11 @@ export default function DashboardPage() {
                       </a>
                     </h2>
 
+                    <InsightChips insights={lead.insights} pricing={lead.pricing} />
+
                     {/* Project Description Snippet */}
                     <p className="text-xs text-slate-600 leading-relaxed line-clamp-3 mb-4 whitespace-pre-line">
-                      {lead.post_text}
+                      {extractDetailsFromPostText(lead.post_text)}
                     </p>
 
                     {/* Bottom Actions Row */}

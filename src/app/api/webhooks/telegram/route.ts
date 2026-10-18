@@ -7,6 +7,7 @@
 // 3. One-click status update callback (mark_app:<id>)
 // ==============================================================================
 
+import { randomBytes } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import {
@@ -16,12 +17,45 @@ import {
   escapeHtml,
 } from '@/lib/notifications/telegram';
 import { generateContextAwareProposal } from '@/lib/ai/proposal-generator';
-import { PortfolioItem } from '@/lib/scrapers/types';
+import { getProjectPricing, pricingPromptHint } from '@/lib/insights/pricing';
+import { PortfolioItem, extractTitleFromPostText, extractDetailsFromPostText } from '@/lib/scrapers/types';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Resolves the PingLead user linked to a Telegram chat (freelancer_profiles first, legacy profiles second).
+ */
+async function findUserIdByChatId(chatId: string | number | undefined): Promise<string | null> {
+  if (chatId === undefined || chatId === null) return null;
+  const chat = String(chatId);
+
+  const { data: fp } = await supabaseAdmin
+    .from('freelancer_profiles')
+    .select('user_id')
+    .eq('telegram_chat_id', chat)
+    .maybeSingle();
+  if (fp?.user_id) return fp.user_id;
+
+  const { data: legacy } = await supabaseAdmin
+    .from('profiles')
+    .select('id')
+    .eq('telegram_chat_id', chat)
+    .maybeSingle();
+  return legacy?.id ?? null;
+}
+
 export async function POST(req: NextRequest) {
   try {
+    // Verify the request really comes from Telegram (secret_token set via setWebhook)
+    const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+    if (webhookSecret) {
+      if (req.headers.get('x-telegram-bot-api-secret-token') !== webhookSecret) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+    } else if (process.env.NODE_ENV === 'production') {
+      console.warn('[Telegram Webhook] TELEGRAM_WEBHOOK_SECRET is not set - webhook requests are not verified.');
+    }
+
     const update = await req.json();
 
     // --------------------------------------------------------------------------
@@ -36,32 +70,57 @@ export async function POST(req: NextRequest) {
         const connectToken = parts.length > 1 ? parts[1].trim() : null;
 
         if (connectToken) {
-          // Look up user by connect token in profiles
-          const { data: profile } = await supabaseAdmin
-            .from('profiles')
-            .select('id, full_name, email')
+          // Look up the account by connect token (freelancer_profiles is what the Settings page uses;
+          // legacy profiles kept as a fallback for older links)
+          let linkedUserId: string | null = null;
+          let linkedName: string | null = null;
+
+          const { data: fp } = await (supabaseAdmin.from('freelancer_profiles') as any)
+            .select('user_id, full_name')
             .eq('telegram_connect_token', connectToken)
             .maybeSingle();
 
-          if (profile) {
-            // Update telegram_chat_id in profiles
-            await supabaseAdmin
+          if (fp) {
+            linkedUserId = fp.user_id;
+            linkedName = fp.full_name;
+          } else {
+            const { data: legacy } = await supabaseAdmin
               .from('profiles')
-              .update({ telegram_chat_id: String(chatId) })
-              .eq('id', profile.id);
-
-            // Synchronize with freelancer_profiles if present
-            try {
-              await supabaseAdmin
-                .from('freelancer_profiles')
-                .update({ telegram_chat_id: String(chatId) })
-                .eq('user_id', profile.id);
-            } catch (e) {
-              // Ignore if table does not exist
+              .select('id, full_name')
+              .eq('telegram_connect_token', connectToken)
+              .maybeSingle();
+            if (legacy) {
+              linkedUserId = legacy.id;
+              linkedName = legacy.full_name;
             }
+          }
+
+          if (linkedUserId) {
+            const chat = String(chatId);
+
+            // A Telegram chat belongs to one account: detach it from any other account first
+            await (supabaseAdmin.from('freelancer_profiles') as any)
+              .update({ telegram_chat_id: null })
+              .eq('telegram_chat_id', chat)
+              .neq('user_id', linkedUserId);
+            await (supabaseAdmin.from('profiles') as any)
+              .update({ telegram_chat_id: null })
+              .eq('telegram_chat_id', chat)
+              .neq('id', linkedUserId);
+
+            // Link, and rotate the token so a leaked /start link can't be reused
+            await (supabaseAdmin.from('freelancer_profiles') as any)
+              .update({
+                telegram_chat_id: chat,
+                telegram_connect_token: randomBytes(16).toString('hex'),
+              })
+              .eq('user_id', linkedUserId);
+            await (supabaseAdmin.from('profiles') as any)
+              .update({ telegram_chat_id: chat })
+              .eq('id', linkedUserId);
 
             const welcomeMsg =
-              `🎉 <b>أهلاً بك يا ${escapeHtml(profile.full_name || 'عزيزي المحترف')} في رادار PingLead!</b>\n\n` +
+              `🎉 <b>أهلاً بك يا ${escapeHtml(linkedName || 'عزيزي المحترف')} في رادار PingLead!</b>\n\n` +
               `✅ <b>تم ربط حسابك في المنصة بنجاح!</b>\n` +
               `📡 رادارك متصل الآن لمراقبة <b>9 منصات عمل حر عالمية وعربية</b> على مدار الساعة:\n` +
               `• مستقل (Mostaql)\n` +
@@ -120,6 +179,7 @@ export async function POST(req: NextRequest) {
         let projectCategory = 'web_dev';
         let effectiveUserId = '';
         let proposalText = '';
+        let projectRow: any = null;
 
         // 2. Try fetching from user_project_actions first
         try {
@@ -139,7 +199,13 @@ export async function POST(req: NextRequest) {
                 platform,
                 category,
                 budget,
-                budget_usd_estimate
+                budget_usd_estimate,
+                budget_min,
+                budget_max,
+                currency,
+                bids_count,
+                bids_avg,
+                duration_text
               )
             `)
             .eq('id', actionId)
@@ -147,6 +213,7 @@ export async function POST(req: NextRequest) {
 
           if (action && (action as any).projects) {
             const p = (action as any).projects;
+            projectRow = p;
             projectTitle = p.title;
             projectDesc = p.description;
             projectUrl = p.url;
@@ -182,9 +249,8 @@ export async function POST(req: NextRequest) {
 
             if (delivery && (delivery as any).leads_pool) {
               const lp = (delivery as any).leads_pool;
-              projectDesc = lp.post_text || '';
-              const firstLine = projectDesc.split('\n')[0] || '';
-              projectTitle = firstLine.replace(/\[.*?\]/g, '').trim() || 'مشروع عمل حر';
+              projectDesc = extractDetailsFromPostText(lp.post_text);
+              projectTitle = extractTitleFromPostText(lp.post_text) || 'مشروع عمل حر';
               projectUrl = lp.post_url || '';
               projectPlatform = lp.platform || '';
               projectCategory = lp.category_slug || 'web_dev';
@@ -206,9 +272,8 @@ export async function POST(req: NextRequest) {
               .maybeSingle();
 
             if (directLead) {
-              projectDesc = directLead.post_text || '';
-              const firstLine = projectDesc.split('\n')[0] || '';
-              projectTitle = firstLine.replace(/\[.*?\]/g, '').trim() || 'مشروع عمل حر';
+              projectDesc = extractDetailsFromPostText(directLead.post_text);
+              projectTitle = extractTitleFromPostText(directLead.post_text) || 'مشروع عمل حر';
               projectUrl = directLead.post_url || '';
               projectPlatform = directLead.platform || '';
               projectCategory = directLead.category_slug || 'web_dev';
@@ -223,12 +288,35 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ ok: false, error: 'Project not found' });
         }
 
-        // 5. Fetch freelancer profile context
+        // 4b. The chat that pressed the button must own this project record
+        const chatOwnerId = await findUserIdByChatId(chatId);
+        if (!chatOwnerId || (effectiveUserId && effectiveUserId !== chatOwnerId)) {
+          await sendTelegramTextMessage(
+            chatId,
+            '⚠️ هذا المشروع غير مرتبط بحسابك. اربط تليجرام من لوحة التحكم أولاً.'
+          );
+          return NextResponse.json({ ok: false, error: 'Chat does not own this record' }, { status: 403 });
+        }
+        effectiveUserId = chatOwnerId;
+
+        // 5. Fetch freelancer profile context (same source as the Settings page)
         let freelancerBio = '';
-        let freelancerSkills = '';
+        let freelancerSkills: string | string[] = '';
         let toneOfVoice = 'confident';
 
-        if (effectiveUserId) {
+        const { data: fp } = await supabaseAdmin
+          .from('freelancer_profiles')
+          .select('bio, title, skills, tone_of_voice, full_name')
+          .eq('user_id', effectiveUserId)
+          .maybeSingle();
+
+        if (fp) {
+          freelancerBio = fp.bio || fp.title || '';
+          freelancerSkills = fp.skills || '';
+          toneOfVoice = fp.tone_of_voice || 'confident';
+        }
+
+        if (!freelancerBio) {
           const { data: prof } = await supabaseAdmin
             .from('profiles')
             .select('*')
@@ -267,7 +355,21 @@ export async function POST(req: NextRequest) {
 
         // 7. Generate context-aware proposal if not already cached
         if (!proposalText) {
+          const pricing = projectRow
+            ? await getProjectPricing({
+                platform: projectRow.platform,
+                category: projectRow.category,
+                budget_min: projectRow.budget_min,
+                budget_max: projectRow.budget_max,
+                currency: projectRow.currency,
+                bids_count: projectRow.bids_count,
+                bids_avg: projectRow.bids_avg,
+                duration_text: projectRow.duration_text,
+              }).catch(() => null)
+            : null;
+
           const genResult = await generateContextAwareProposal({
+            pricingHint: pricing ? pricingPromptHint(pricing) : undefined,
             title: projectTitle,
             description: projectDesc,
             category: projectCategory,
@@ -341,10 +443,16 @@ export async function POST(req: NextRequest) {
       if (data.startsWith('mark_app:')) {
         const actionId = data.replace('mark_app:', '').trim();
 
+        const chatOwnerId = await findUserIdByChatId(chatId);
+        if (!chatOwnerId) {
+          await answerTelegramCallback(callbackId, '⚠️ اربط تليجرام بحسابك من لوحة التحكم أولاً.');
+          return NextResponse.json({ ok: false, error: 'Chat not linked' }, { status: 403 });
+        }
+
         // 1. Immediately acknowledge Telegram
         await answerTelegramCallback(callbackId, '✅ تم تسجيل تقديمك على المشروع بنجاح!');
 
-        // 2. Update status in database
+        // 2. Update status in database (only rows owned by this chat's user)
         let updated = false;
         try {
           const { error: actErr } = await supabaseAdmin
@@ -353,7 +461,8 @@ export async function POST(req: NextRequest) {
               status: 'applied',
               updated_at: new Date().toISOString(),
             })
-            .eq('id', actionId);
+            .eq('id', actionId)
+            .eq('user_id', chatOwnerId);
           if (!actErr) updated = true;
         } catch (e) {
           // ignore
@@ -365,7 +474,8 @@ export async function POST(req: NextRequest) {
             .update({
               smart_reply_generated_at: new Date().toISOString(),
             })
-            .eq('id', actionId);
+            .eq('id', actionId)
+            .eq('user_id', chatOwnerId);
           if (!delErr) updated = true;
         } catch (e) {
           // ignore

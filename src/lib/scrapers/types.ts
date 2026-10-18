@@ -298,7 +298,7 @@ export const CATEGORIES_METADATA: CategoryMetadata[] = [
  * Standard Unified Project Model for all freelance marketplaces.
  * Corresponds to public.projects table in Supabase.
  */
-export interface UnifiedProject {
+export interface UnifiedProject extends ProjectInsights {
   id?: string;
   external_id: string;
   platform: FreelancePlatform;
@@ -328,6 +328,34 @@ export interface UnifiedProject {
   is_buyer?: boolean;
   ai_reason_short?: string;
 }
+
+/**
+ * Competition & client signals read from the source platform (all optional -
+ * each platform exposes a different subset). Stored on public.projects (migration 0010).
+ */
+export interface ProjectInsights {
+  bids_count?: number | null;
+  bids_avg?: number | null;
+  client_hire_rate?: number | null; // 0-100
+  client_open_projects?: number | null;
+  client_in_progress?: number | null;
+  client_registered_at?: string | null;
+  client_country?: string | null;
+  duration_text?: string | null;
+  details_fetched_at?: string | null;
+}
+
+export const PROJECT_INSIGHT_KEYS: (keyof ProjectInsights)[] = [
+  'bids_count',
+  'bids_avg',
+  'client_hire_rate',
+  'client_open_projects',
+  'client_in_progress',
+  'client_registered_at',
+  'client_country',
+  'duration_text',
+  'details_fetched_at',
+];
 
 export type UnifiedLead = UnifiedProject;
 export type RawScrapedPost = UnifiedProject;
@@ -453,6 +481,16 @@ export function estimateBudgetUsd(
   return amount; // Default fallback
 }
 
+/** The leads_pool text format read back by extractTitleFromPostText / extractDetailsFromPostText. */
+export function buildPostText(
+  platform: string,
+  title: string,
+  budget: string | null | undefined,
+  description: string
+): string {
+  return `[${platform.toUpperCase()} - طلب مشروع]\nعنوان: ${title}\n${budget ? `الميزانية: ${budget}\n` : ''}التفاصيل: ${description}`.trim();
+}
+
 /**
  * Factory helper to construct a typed UnifiedProject with formatted post_text
  */
@@ -470,6 +508,7 @@ export function createUnifiedProject(params: {
   category: ProjectCategory;
   published_at?: string;
   author?: string;
+  insights?: ProjectInsights;
 }): UnifiedProject {
   const published_at = params.published_at || new Date().toISOString();
   const author = params.author || 'صاحب مشروع';
@@ -484,7 +523,7 @@ export function createUnifiedProject(params: {
   const bestAmount = params.budget_max || params.budget_min || null;
   const budget_usd_estimate = estimateBudgetUsd(bestAmount, currency);
 
-  const post_text = `[${params.platform.toUpperCase()} - طلب مشروع]\nعنوان: ${params.title}\n${budget ? `الميزانية: ${budget}\n` : ''}التفاصيل: ${params.description}`.trim();
+  const post_text = buildPostText(params.platform, params.title, budget, params.description);
 
   return {
     external_id: params.external_id,
@@ -510,7 +549,31 @@ export function createUnifiedProject(params: {
     category_slug: params.category,
     intent_score: 10,
     is_buyer: true,
+    ...(params.insights || {}),
   };
+}
+
+/**
+ * Reads the title back out of a post_text built by createUnifiedProject:
+ * "[PLATFORM - طلب مشروع]\nعنوان: <title>\nالميزانية: ...\nالتفاصيل: <description>"
+ * Falls back to the first non-tag line for older/other formats.
+ */
+export function extractTitleFromPostText(postText: string | null | undefined): string {
+  const text = postText || '';
+  const titleLine = text.match(/^عنوان:\s*(.+)$/m);
+  if (titleLine) return titleLine[1].trim();
+  const firstReal = text
+    .split('\n')
+    .map((l) => l.replace(/\[.*?\]/g, '').trim())
+    .find(Boolean);
+  return firstReal || '';
+}
+
+/** The description part of a post_text (everything after "التفاصيل:"), or the whole text. */
+export function extractDetailsFromPostText(postText: string | null | undefined): string {
+  const text = postText || '';
+  const idx = text.indexOf('التفاصيل:');
+  return idx >= 0 ? text.slice(idx + 'التفاصيل:'.length).trim() : text;
 }
 
 // Alias for createUnifiedLead

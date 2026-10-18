@@ -7,6 +7,32 @@
 
 import fs from 'fs';
 import path from 'path';
+import type { ProjectInsights } from '@/lib/scrapers/types';
+import type { ProjectPricing } from '@/lib/insights/pricing';
+import { getCompetitionVerdict, getClientVerdict } from '@/lib/insights/competition';
+
+/**
+ * Competition, client and delivery-time lines for an alert card (empty when the platform gives nothing).
+ */
+export function formatInsightLines(p: ProjectInsights): string {
+  const lines: string[] = [];
+
+  const competition = getCompetitionVerdict(p);
+  if (competition.level !== 'unknown') {
+    const avg = p.bids_avg ? ` · متوسط العروض $${p.bids_avg}` : '';
+    lines.push(`🏁 <b>المنافسة:</b> ${competition.emoji} ${competition.label} (${competition.advice})${avg}`);
+  }
+
+  const client = getClientVerdict(p);
+  const clientParts = [client.label, ...client.details].filter(Boolean);
+  if (clientParts.length) {
+    lines.push(`👤 <b>العميل:</b> ${client.emoji} ${escapeHtml(clientParts.join(' · '))}`);
+  }
+
+  if (p.duration_text) lines.push(`⏳ <b>مدة التنفيذ:</b> ${escapeHtml(p.duration_text)}`);
+
+  return lines.length ? `\n${lines.join('\n')}` : '';
+}
 
 function getTelegramToken(): string {
   if (process.env.TELEGRAM_BOT_TOKEN) return process.env.TELEGRAM_BOT_TOKEN;
@@ -48,7 +74,7 @@ export function getPlatformBadge(platform: string, url?: string): string {
   return `💼 ${platform.toUpperCase()}`;
 }
 
-export interface TelegramProjectAlertData {
+export interface TelegramProjectAlertData extends ProjectInsights {
   title: string;
   description: string;
   url: string;
@@ -56,7 +82,9 @@ export interface TelegramProjectAlertData {
   category: string;
   budget?: string | null;
   budget_usd_estimate?: number | null;
+  currency?: string | null;
   source_created_at?: string | null;
+  pricing?: ProjectPricing | null;
 }
 
 /**
@@ -76,9 +104,22 @@ export async function sendSmartFilterTelegramAlert(
 
   const cleanTitle = escapeHtml(project.title);
   const cleanSnippet = escapeHtml((project.description || '').slice(0, 320).trim());
+  // Original budget, then its EGP equivalent (and a USD estimate for other currencies)
+  const isUsd = !project.currency || ['USD', '$'].includes(project.currency.toUpperCase());
+  const budgetExtras = [
+    !isUsd && project.budget_usd_estimate ? `~$${project.budget_usd_estimate}` : null,
+    project.pricing?.budgetEgpText || null,
+  ].filter(Boolean);
   const budgetInfo = project.budget
-    ? `${project.budget}${project.budget_usd_estimate ? ` (~$${project.budget_usd_estimate} USD)` : ''}`
+    ? `${project.budget}${budgetExtras.length ? ` (${budgetExtras.join(' · ')})` : ''}`
     : 'غير محدد';
+
+  const suggestion = project.pricing?.suggestion;
+  const suggestionLine = suggestion
+    ? `\n💡 <b>السعر المقترح:</b> ${suggestion.priceUsd}$` +
+      `${suggestion.priceEgpText ? ` (${suggestion.priceEgpText})` : ''} في ${suggestion.daysText}` +
+      `${suggestion.reasons.length ? `\n   ↳ <i>${escapeHtml(suggestion.reasons.join(' · '))}</i>` : ''}`
+    : '';
   const platformLabel = getPlatformBadge(project.platform, project.url);
 
   let dateInfo = '';
@@ -102,7 +143,9 @@ export async function sendSmartFilterTelegramAlert(
     `🎯 <b>تنبيه فلتر ذكي: ${escapeHtml(filterName)}</b>\n\n` +
     `💼 <b>${cleanTitle}</b>\n` +
     `📍 <b>المنصة:</b> ${platformLabel}\n` +
-    `💰 <b>الميزانية:</b> ${escapeHtml(budgetInfo)}\n` +
+    `💰 <b>الميزانية:</b> ${escapeHtml(budgetInfo)}` +
+    `${suggestionLine}` +
+    `${formatInsightLines(project)}\n` +
     `🏷️ <b>التصنيف:</b> #${project.category}${dateInfo}\n\n` +
     `📝 <b>الوصف:</b>\n` +
     `"${cleanSnippet}..."\n\n` +

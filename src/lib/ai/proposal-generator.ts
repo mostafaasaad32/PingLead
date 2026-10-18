@@ -46,6 +46,8 @@ export interface GenerateProposalInput {
   toneOfVoice?: string;
   customInstructions?: string;
   portfolioItems?: PortfolioItem[];
+  /** Market price/timeline baseline (see pricingPromptHint) for the model to adjust to the real scope */
+  pricingHint?: string;
 }
 
 export interface GenerateProposalOutput {
@@ -102,6 +104,7 @@ FREELANCER PROFILE:
 - Tone of Voice: ${tone} (Write with a ${tone} attitude)
 ${input.customInstructions ? `- Special User Custom Instructions: ${input.customInstructions}` : ''}
 
+${input.pricingHint ? `PRICING GUIDANCE:\n${input.pricingHint}\n` : ''}
 ${portfolioPromptContext}
 
 Generate the winning pitch proposal now:

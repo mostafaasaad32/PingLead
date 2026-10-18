@@ -80,7 +80,8 @@ export async function scrapeKafiilCategory(
       const cleanTitle = rawTitle.replace(/<[^>]*>/g, '').replace(/مفتوح/g, '').replace(/\s+/g, ' ').trim();
       if (!cleanTitle) continue;
 
-      const subHtml = html.slice(match.index, match.index + 1200);
+      // Percent-encoded Arabic URLs make the title link alone several hundred chars long
+      const subHtml = html.slice(match.index, match.index + 4000);
       const authorMatch = subHtml.match(/class="text\s+user"[^>]*>([\s\S]*?)<\/a>/i);
       const author = authorMatch
         ? authorMatch[1].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
@@ -89,8 +90,13 @@ export async function scrapeKafiilCategory(
       const agoMatch = subHtml.match(/<i class="far fa-clock"><\/i>\s*([\s\S]*?)<\/span>/i);
       const publishedAt = parseArabicRelativeDate(agoMatch ? agoMatch[1].replace(/<[^>]*>/g, '').trim() : null);
 
+      // Bids so far: <i class="fas fa-hand-holding-usd"></i> 15 عروض (stop at the next card)
+      const nextCard = subHtml.indexOf('class="name bold-text', match[0].length);
+      const cardHtml = nextCard > 0 ? subHtml.slice(0, nextCard) : subHtml;
+      const bidsMatch = cardHtml.match(/fa-hand-holding-usd"><\/i>\s*(\d+)/i);
+
       const detectedCat = classifyProjectCategory(cleanTitle, categorySlug);
-      const budget = extractCleanBudget(`${cleanTitle} ${subHtml}`);
+      const budget = extractCleanBudget(`${cleanTitle} ${cardHtml}`);
 
       projects.push(
         createUnifiedProject({
@@ -107,6 +113,7 @@ export async function scrapeKafiilCategory(
           category: detectedCat,
           published_at: publishedAt,
           author,
+          insights: { bids_count: bidsMatch ? parseInt(bidsMatch[1], 10) : null },
         })
       );
     }

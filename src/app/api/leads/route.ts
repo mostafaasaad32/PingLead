@@ -6,34 +6,71 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { PLATFORMS_METADATA } from '@/lib/scrapers/types';
+import { PLATFORMS_METADATA, PROJECT_INSIGHT_KEYS } from '@/lib/scrapers/types';
+import { triggerIngest } from '@/lib/cron/trigger';
+import { getRates } from '@/lib/currency/rates';
+import { getProjectPricing } from '@/lib/insights/pricing';
 
 const ALL_PLATFORM_IDS = PLATFORMS_METADATA.map((p) => p.id);
 
 export const dynamic = 'force-dynamic';
 
-let lastAutoScrapeTimestamp = 0;
-let isAutoScrapingActive = false;
+/**
+ * Adds competition & client signals, the EGP budget and a suggested bid from `projects` to each lead.
+ * leads_pool.external_post_id is "<platform>_<external_id>" (see createUnifiedProject).
+ * Returns leads unchanged if the insight columns don't exist yet (migration 0010).
+ */
+async function attachProjectInsights(leads: any[]): Promise<any[]> {
+  const idsByPlatform = new Map<string, string[]>();
+  for (const lead of leads) {
+    const prefix = `${lead.platform}_`;
+    if (!lead.external_post_id?.startsWith(prefix)) continue;
+    const externalId = lead.external_post_id.slice(prefix.length);
+    idsByPlatform.set(lead.platform, [...(idsByPlatform.get(lead.platform) || []), externalId]);
+  }
+
+  const PRICING_KEYS = ['budget_min', 'budget_max', 'currency', 'category'];
+  const rowsByKey = new Map<string, Record<string, any>>();
+  for (const [platform, ids] of idsByPlatform) {
+    const { data, error } = await (supabaseAdmin.from('projects') as any)
+      .select(['external_id', ...PRICING_KEYS, ...PROJECT_INSIGHT_KEYS].join(','))
+      .eq('platform', platform)
+      .in('external_id', ids);
+    if (error) return leads;
+    for (const row of data || []) rowsByKey.set(`${platform}_${row.external_id}`, row);
+  }
+
+  const rates = await getRates();
+
+  return Promise.all(
+    leads.map(async (lead) => {
+      const row = rowsByKey.get(lead.external_post_id);
+      if (!row) return { ...lead, insights: null, pricing: null };
+
+      const { external_id, budget_min, budget_max, currency, category, ...insights } = row;
+      const pricing = await getProjectPricing(
+        {
+          platform: lead.platform,
+          category,
+          budget_min,
+          budget_max,
+          currency,
+          bids_count: insights.bids_count,
+          bids_avg: insights.bids_avg,
+          duration_text: insights.duration_text,
+        },
+        rates
+      ).catch(() => null);
+
+      return { ...lead, insights, pricing };
+    })
+  );
+}
 
 export async function GET(req: NextRequest) {
   try {
-    // Non-blocking auto-scrape: keeps database fresh every 60 seconds automatically
-    const now = Date.now();
-    if (now - lastAutoScrapeTimestamp > 60_000 && !isAutoScrapingActive) {
-      lastAutoScrapeTimestamp = now;
-      isAutoScrapingActive = true;
-      (async () => {
-        try {
-          const port = process.env.PORT || 3000;
-          const secret = process.env.CRON_SECRET || 'pinglead_cron_secret_secure_9921';
-          await fetch(`http://localhost:${port}/api/cron/ingest?secret=${secret}&scrape=true`);
-        } catch (e) {
-          // ignore
-        } finally {
-          isAutoScrapingActive = false;
-        }
-      })();
-    }
+    // Non-blocking auto-scrape: keeps database fresh (rate-limited to once per 60s inside triggerIngest)
+    triggerIngest(true).catch(() => {});
 
     const category = req.nextUrl.searchParams.get('category');
     const platform = req.nextUrl.searchParams.get('platform');
@@ -115,9 +152,11 @@ export async function GET(req: NextRequest) {
       .in('platform', ALL_PLATFORM_IDS)
       .gte('intent_score', 8);
 
+    const leadsWithInsights = await attachProjectInsights(leads || []);
+
     return NextResponse.json({
       ok: true,
-      leads: leads || [],
+      leads: leadsWithInsights,
       totalScanned: totalScanned || 0,
       highIntentCount: highIntentCount || 0,
     });

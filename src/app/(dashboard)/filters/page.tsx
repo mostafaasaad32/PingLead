@@ -108,8 +108,19 @@ export default function JobFiltersWorkspace() {
   const [excludeTags, setExcludeTags] = useState<string[]>([]);
   const [excludeInput, setExcludeInput] = useState("");
 
-  const [minBudget, setMinBudget] = useState<number>(0);
+  const [minBudget, setMinBudget] = useState<number>(0); // always stored in USD
   const [includeNoBudget, setIncludeNoBudget] = useState<boolean>(true);
+  const [budgetCurrency, setBudgetCurrency] = useState<"USD" | "EGP">("USD");
+  const [usdEgpRate, setUsdEgpRate] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch("/api/currency/rates")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.ok && data.usd_egp) setUsdEgpRate(data.usd_egp);
+      })
+      .catch(() => {});
+  }, []);
 
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(ALL_PLATFORMS);
   const [selectedCategories, setSelectedCategories] = useState<string[]>(ALL_CATEGORIES);
@@ -855,29 +866,84 @@ export default function JobFiltersWorkspace() {
             {openSections.budget && (
               <div className="p-4 pt-1 space-y-3.5 border-t border-slate-100">
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold text-slate-600">
-                      الحد الأدنى للميزانية (USD):
-                    </label>
-                    <span className="text-xs font-bold text-emerald-600 font-mono">
-                      ${minBudget}
-                    </span>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[11px] font-bold text-slate-600">الحد الأدنى للميزانية:</label>
+                    {usdEgpRate && (
+                      <div className="inline-flex p-0.5 bg-slate-100 rounded-lg border border-slate-200">
+                        {(["USD", "EGP"] as const).map((cur) => (
+                          <button
+                            key={cur}
+                            type="button"
+                            onClick={() => setBudgetCurrency(cur)}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition ${
+                              budgetCurrency === cur ? "bg-white text-slate-900 shadow-xs" : "text-slate-500"
+                            }`}
+                          >
+                            {cur === "USD" ? "دولار $" : "جنيه ج.م"}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1000"
-                    step="25"
-                    value={minBudget}
-                    onChange={(e) => setMinBudget(parseInt(e.target.value, 10))}
-                    className="w-full accent-emerald-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
-                  />
-                  <div className="flex justify-between text-[10px] text-slate-400 font-mono mt-1">
-                    <span>$0</span>
-                    <span>$250</span>
-                    <span>$500</span>
-                    <span>$1000+</span>
-                  </div>
+
+                  {budgetCurrency === "EGP" && usdEgpRate ? (
+                    <>
+                      <div className="flex items-baseline justify-between mb-1">
+                        <span className="text-xs font-bold text-emerald-600 font-mono">
+                          {Math.round(minBudget * usdEgpRate).toLocaleString("en-US")} ج.م
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">≈ ${minBudget}</span>
+                      </div>
+                      <input
+                        id="min-budget-egp"
+                        type="range"
+                        min="0"
+                        max="50000"
+                        step="500"
+                        value={Math.round(minBudget * usdEgpRate)}
+                        onChange={(e) => setMinBudget(Math.round(parseInt(e.target.value, 10) / usdEgpRate))}
+                        className="w-full accent-emerald-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                      />
+                      <div className="flex justify-between text-[10px] text-slate-400 font-mono mt-1">
+                        <span>0</span>
+                        <span>12,500</span>
+                        <span>25,000</span>
+                        <span>50,000+ ج.م</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-baseline justify-between mb-1">
+                        <span className="text-xs font-bold text-emerald-600 font-mono">${minBudget}</span>
+                        {usdEgpRate && (
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            ≈ {Math.round(minBudget * usdEgpRate).toLocaleString("en-US")} ج.م
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        id="min-budget-usd"
+                        type="range"
+                        min="0"
+                        max="1000"
+                        step="25"
+                        value={minBudget}
+                        onChange={(e) => setMinBudget(parseInt(e.target.value, 10))}
+                        className="w-full accent-emerald-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                      />
+                      <div className="flex justify-between text-[10px] text-slate-400 font-mono mt-1">
+                        <span>$0</span>
+                        <span>$250</span>
+                        <span>$500</span>
+                        <span>$1000+</span>
+                      </div>
+                    </>
+                  )}
+                  {usdEgpRate && (
+                    <p className="text-[10px] text-slate-400 mt-1.5">
+                      سعر الدولار اليوم: {usdEgpRate.toFixed(2)} ج.م
+                    </p>
+                  )}
                 </div>
 
                 <label className="flex items-center gap-2 text-xs text-slate-700 font-medium cursor-pointer">

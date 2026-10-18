@@ -20,27 +20,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = await request.json().catch(() => ({}));
-    let targetChatId = body.chatId;
+    // Always send to the chat linked to this account - never to an ID from the request
+    const { data: profile } = await (supabase
+      .from("freelancer_profiles") as any)
+      .select("telegram_chat_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-    // If chatId not provided in body, fetch from profile
-    if (!targetChatId) {
-      const { data: profile } = await (supabase
-        .from("freelancer_profiles") as any)
-        .select("telegram_chat_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      const profileData = profile as { telegram_chat_id: string | null } | null;
-      targetChatId = profileData?.telegram_chat_id;
-    }
+    const targetChatId = (profile as { telegram_chat_id: string | null } | null)?.telegram_chat_id;
 
     if (!targetChatId) {
       return NextResponse.json(
-        {
-          error:
-            "لم يتم تحديد Telegram Chat ID. يرجى إدخال معرف المحادثة وحفظه أولاً.",
-        },
+        { error: "تليجرام غير مربوط بحسابك بعد. اضغط زر «ربط تليجرام» أولاً." },
         { status: 400 }
       );
     }
@@ -84,9 +75,8 @@ export async function POST(request: Request) {
     if (!telegramRes.ok || !telegramData.ok) {
       const desc = telegramData.description || "فشل إرسال الرسالة إلى تليجرام";
       let hint = "";
-      if (desc.includes("chat not found")) {
-        hint =
-          "تأكد من بدء محادثة مع البوت أولاً بالضغط على /start في @Ping_Lead22_bot";
+      if (desc.includes("chat not found") || desc.includes("blocked")) {
+        hint = "افصل تليجرام واربطه مرة أخرى من الإعدادات.";
       }
       return NextResponse.json(
         { error: `${desc}. ${hint}` },

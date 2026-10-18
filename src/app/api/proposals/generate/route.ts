@@ -7,8 +7,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { PortfolioItem } from '@/lib/scrapers/types';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { PortfolioItem, extractTitleFromPostText, extractDetailsFromPostText } from '@/lib/scrapers/types';
 import { generateContextAwareProposal } from '@/lib/ai/proposal-generator';
+import { getProjectPricing, pricingPromptHint } from '@/lib/insights/pricing';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,11 +18,23 @@ export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   try {
+    // 0. Require an authenticated session; the user is always taken from the cookie, never the body
+    const supabase = await createServerSupabaseClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json(
+        { error: 'غير مصرح - يرجى تسجيل الدخول' },
+        { status: 401 }
+      );
+    }
+
     const body = await req.json();
     const {
       project_id,
       lead_id,
-      user_id,
       project_title,
       project_description,
       freelancer_bio,
@@ -35,23 +49,12 @@ export async function POST(req: NextRequest) {
     let category = 'web_dev';
     let platform = '';
 
-    // 1. Fetch project details if project_id or lead_id provided
+    // 1. Resolve the stored project (directly, or through the dashboard's leads_pool row)
+    let proj: any = null;
     if (project_id) {
-      const { data: proj } = await supabaseAdmin
-        .from('projects')
-        .select('*')
-        .eq('id', project_id)
-        .maybeSingle();
-
-      if (proj) {
-        title = proj.title || title;
-        description = proj.description || description;
-        category = proj.category || category;
-        platform = proj.platform || platform;
-      }
-    }
-
-    if (!title && lead_id) {
+      const { data } = await supabaseAdmin.from('projects').select('*').eq('id', project_id).maybeSingle();
+      proj = data;
+    } else if (lead_id) {
       const { data: lead } = await supabaseAdmin
         .from('leads_pool')
         .select('*')
@@ -59,13 +62,45 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
 
       if (lead) {
-        description = lead.post_text || description;
-        const firstLine = (lead.post_text || '').split('\n')[0] || '';
-        title = firstLine.replace(/\[.*?\]/g, '').trim() || title;
+        title = title || extractTitleFromPostText(lead.post_text);
+        description = description || extractDetailsFromPostText(lead.post_text);
         category = lead.category_slug || category;
         platform = lead.platform || platform;
+
+        const prefix = `${lead.platform}_`;
+        if (lead.external_post_id?.startsWith(prefix)) {
+          const { data } = await (supabaseAdmin.from('projects') as any)
+            .select('*')
+            .eq('platform', lead.platform)
+            .eq('external_id', lead.external_post_id.slice(prefix.length))
+            .maybeSingle();
+          proj = data;
+        }
       }
     }
+
+    if (proj) {
+      targetProjectId = proj.id;
+      title = proj.title || title;
+      // Mostaql projects store the full page description; prefer it over the listing snippet
+      if (proj.description && proj.description.length > description.length) description = proj.description;
+      category = proj.category || category;
+      platform = proj.platform || platform;
+    }
+
+    // 1b. Market price/timeline baseline for the AI to adjust
+    const pricing = proj
+      ? await getProjectPricing({
+          platform: proj.platform,
+          category: proj.category,
+          budget_min: proj.budget_min,
+          budget_max: proj.budget_max,
+          currency: proj.currency,
+          bids_count: proj.bids_count,
+          bids_avg: proj.bids_avg,
+          duration_text: proj.duration_text,
+        }).catch(() => null)
+      : null;
 
     if (!title && !description) {
       return NextResponse.json(
@@ -75,38 +110,23 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Identify effective user context (freelancer_profiles)
-    let effectiveUserId = user_id || null;
+    const effectiveUserId = user.id;
     let effectiveBio = freelancer_bio || '';
     let effectiveSkills = freelancer_skills || '';
-    let effectiveTone = tone_of_voice || 'confident';
+    let effectiveTone = tone_of_voice || '';
 
-    if (!effectiveUserId) {
-      // Fallback to first profile in database if available
-      const { data: defaultProfile } = await supabaseAdmin
-        .from('freelancer_profiles')
-        .select('*')
-        .limit(1)
-        .maybeSingle();
+    const { data: profile } = await supabaseAdmin
+      .from('freelancer_profiles')
+      .select('*')
+      .eq('user_id', effectiveUserId)
+      .maybeSingle();
 
-      if (defaultProfile) {
-        effectiveUserId = defaultProfile.user_id;
-        effectiveBio = effectiveBio || defaultProfile.bio || defaultProfile.title || '';
-        effectiveSkills = effectiveSkills || defaultProfile.skills || '';
-        effectiveTone = effectiveTone || defaultProfile.tone_of_voice || 'confident';
-      }
-    } else {
-      const { data: profile } = await supabaseAdmin
-        .from('freelancer_profiles')
-        .select('*')
-        .eq('user_id', effectiveUserId)
-        .maybeSingle();
-
-      if (profile) {
-        effectiveBio = effectiveBio || profile.bio || profile.title || '';
-        effectiveSkills = effectiveSkills || profile.skills || '';
-        effectiveTone = effectiveTone || profile.tone_of_voice || 'confident';
-      }
+    if (profile) {
+      effectiveBio = effectiveBio || profile.bio || profile.title || '';
+      effectiveSkills = effectiveSkills || profile.skills || '';
+      effectiveTone = effectiveTone || profile.tone_of_voice || 'confident';
     }
+    effectiveTone = effectiveTone || 'confident';
 
     // 3. Fetch Portfolio Items
     let portfolioItems: PortfolioItem[] = [];
@@ -140,6 +160,7 @@ export async function POST(req: NextRequest) {
       toneOfVoice: effectiveTone,
       customInstructions: custom_instructions,
       portfolioItems,
+      pricingHint: pricing ? pricingPromptHint(pricing) : undefined,
     });
 
     // 4.5. Deduct 1 credit from freelancer_profiles in Supabase

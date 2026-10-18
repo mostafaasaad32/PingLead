@@ -26,7 +26,11 @@ function loadEnv() {
 }
 loadEnv();
 
-const CRON_SECRET = process.env.CRON_SECRET || "pinglead_cron_secret_secure_9921";
+const CRON_SECRET = process.env.CRON_SECRET;
+if (!CRON_SECRET) {
+  console.error("❌ CRON_SECRET is not set in .env — the worker cannot authenticate with /api/cron/ingest.");
+  process.exit(1);
+}
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.APP_URL || `http://localhost:${PORT}`;
 const INTERVAL_SECONDS = 60; // Automated scan every 60 seconds
@@ -53,10 +57,10 @@ async function runCronCycle() {
   console.log(`[${timestamp}] 🔄 Radar Ingestion Cycle #${cycleCount} initiating across 9 platforms...`);
 
   try {
-    const url = `${BASE_URL}/api/cron/ingest?secret=${CRON_SECRET}&scrape=true`;
+    const url = `${BASE_URL}/api/cron/ingest?scrape=true`;
     const res = await fetch(url, {
       method: "GET",
-      headers: { "Accept": "application/json" }
+      headers: { "Accept": "application/json", "Authorization": `Bearer ${CRON_SECRET}` }
     });
 
     if (!res.ok) {

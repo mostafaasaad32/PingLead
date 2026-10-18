@@ -1,121 +1,141 @@
 // ==============================================================================
 // src/lib/scrapers/pph.ts
-// Global Freelance Platform Scraper (PeoplePerHour & Remotive Global Feed)
-// Siphons live freelance & remote client opportunities at $0 API Cost
+// Global Freelance Platform Scraper (PeoplePerHour)
+// PPH's RSS feed now returns an HTML page, so this reads the job listing page's
+// embedded state (window.PPHReact.initialState -> entities.projects), which carries
+// the full job: description, budget, currency, posted date, proposal count, client.
 // ==============================================================================
 
-import { UnifiedProject, createUnifiedProject, ProjectCategory } from './types';
-import { classifyProjectCategory, extractCleanBudget, isCategoryMatch } from '../filters/categorizer';
+import { UnifiedProject, createUnifiedProject } from './types';
+import { classifyProjectCategory } from '../filters/categorizer';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
+const BASE_URL = 'https://www.peopleperhour.com/freelance-jobs';
 
-/**
- * Scrapes global freelance opportunities from PeoplePerHour / Remotive Public Stream
- */
+const CATEGORY_PATH: Record<string, string> = {
+  web_mobile_dev: 'technology-programming',
+  web_dev: 'technology-programming',
+  ai_data_automation: 'technology-programming',
+  it_cybersecurity_devops: 'technology-programming',
+  game_ar_vr: 'technology-programming',
+  ecommerce_stores: 'technology-programming',
+  ui_ux_graphic: 'design',
+  ui_ux: 'design',
+  design: 'design',
+  engineering_architecture: 'design',
+  video_audio_motion: 'video-photography',
+  digital_marketing_seo: 'marketing-branding-sales',
+  marketing: 'marketing-branding-sales',
+  writing_translation: 'writing-translation',
+  writing: 'writing-translation',
+  business_accounting_legal: 'business-support',
+  accounting: 'business-support',
+  sales_customer_support: 'business-support',
+};
+
+interface PphJob {
+  proj_id: number;
+  title: string;
+  proj_desc?: string;
+  budget?: number;
+  currency?: string;
+  project_type?: 'fixed_price' | 'hourly' | string;
+  duration?: string | null;
+  posted_dt?: string;
+  url?: string;
+  open?: boolean;
+  proposalCount?: number;
+  client?: { country?: string; reg_dt?: string; shortName?: string };
+}
+
+/** Pulls the job objects out of the page's `window.PPHReact.initialState = {...};` script. */
+function extractJobs(html: string): PphJob[] {
+  const marker = 'window.PPHReact.initialState=';
+  const start = html.indexOf(marker);
+  if (start < 0) return [];
+  const scriptEnd = html.indexOf('</script>', start);
+  let json = html.slice(start + marker.length, scriptEnd);
+  const statementEnd = json.search(/;\s*(window\.|$)/);
+  if (statementEnd > 0) json = json.slice(0, statementEnd);
+
+  try {
+    const state = JSON.parse(json);
+    const projects = state?.entities?.projects || {};
+    return Object.values(projects)
+      .map((p: any) => p?.attributes)
+      .filter((j: any) => j && j.proj_id && j.title);
+  } catch (err: any) {
+    console.warn('[PPH Scraper] Could not parse page state:', err.message);
+    return [];
+  }
+}
+
 export async function scrapePphCategory(
   categorySlug: string = 'web_mobile_dev',
   limit: number = 20
 ): Promise<UnifiedProject[]> {
-  const projects: UnifiedProject[] = [];
+  const path = CATEGORY_PATH[categorySlug];
+  const url = path ? `${BASE_URL}/${path}` : BASE_URL;
 
-  // 1. Attempt PPH RSS Feed
   try {
-    const res = await fetch('https://www.peopleperhour.com/freelance-jobs?feed=rss', {
+    const res = await fetch(url, {
       headers: {
         'User-Agent': USER_AGENT,
-        'Accept': 'application/rss+xml,application/xml,text/xml;q=0.9,*/*;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
       },
     });
 
-    if (res.ok) {
-      const xml = await res.text();
-      const items = xml.match(/<item>([\s\S]*?)<\/item>/gi) || [];
-
-      for (const itemXml of items) {
-        if (projects.length >= limit) break;
-
-        const titleMatch = itemXml.match(/<title>([\s\S]*?)<\/title>/i);
-        const linkMatch = itemXml.match(/<link>([\s\S]*?)<\/link>/i);
-        const descMatch = itemXml.match(/<description>([\s\S]*?)<\/description>/i);
-        const pubDateMatch = itemXml.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
-
-        if (!titleMatch || !linkMatch) continue;
-
-        const title = titleMatch[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/i, '$1').trim();
-        const url = linkMatch[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/i, '$1').trim();
-        const desc = descMatch ? descMatch[1].replace(/<[^>]*>/g, '').trim() : title;
-        const pubDate = pubDateMatch ? new Date(pubDateMatch[1]).toISOString() : new Date().toISOString();
-
-        const cat = classifyProjectCategory(`${title} ${desc}`, categorySlug);
-        const budget = extractCleanBudget(`${title} ${desc}`);
-
-        projects.push(
-          createUnifiedProject({
-            external_id: Buffer.from(url).toString('base64').slice(0, 16),
-            platform: 'pph',
-            title,
-            description: desc,
-            url,
-            budget: budget.budget_text,
-            budget_min: budget.budget_min,
-            budget_max: budget.budget_max,
-            currency: budget.currency,
-            language: 'en',
-            category: cat,
-            published_at: pubDate,
-            author: 'PPH Client',
-          })
-        );
-      }
+    if (!res.ok) {
+      console.warn(`[PPH Scraper] HTTP ${res.status} from ${url}`);
+      return [];
     }
+
+    const jobs = extractJobs(await res.text());
+    const projects: UnifiedProject[] = [];
+
+    for (const job of jobs) {
+      if (projects.length >= limit) break;
+      if (job.open === false) continue;
+
+      const description = (job.proj_desc || job.title).replace(/<[^>]*>/g, '').replace(/\r/g, '').trim();
+      const budget = job.budget && job.budget > 0 ? job.budget : null;
+      const currency = job.currency || 'USD';
+      const isHourly = job.project_type === 'hourly';
+
+      projects.push(
+        createUnifiedProject({
+          external_id: String(job.proj_id),
+          platform: 'pph',
+          title: job.title,
+          description,
+          url: job.url || `${BASE_URL}/${job.proj_id}`,
+          budget: budget ? `${budget} ${currency}${isHourly ? ' / ساعة' : ''}` : null,
+          // Hourly rates aren't a project total; keep them out of the budget bounds
+          budget_min: isHourly ? null : budget,
+          budget_max: isHourly ? null : budget,
+          currency,
+          language: 'en',
+          category: classifyProjectCategory(`${job.title} ${description}`, categorySlug),
+          // posted_dt is "YYYY-MM-DD HH:mm:ss" (UK time); treat as UTC
+          published_at: job.posted_dt
+            ? new Date(job.posted_dt.replace(' ', 'T') + 'Z').toISOString()
+            : new Date().toISOString(),
+          author: job.client?.shortName || 'PPH Client',
+          insights: {
+            bids_count: typeof job.proposalCount === 'number' ? job.proposalCount : null,
+            client_country: job.client?.country || null,
+            client_registered_at: job.client?.reg_dt || null,
+            duration_text: job.duration || null,
+          },
+        })
+      );
+    }
+
+    console.log(`[PPH Scraper] Extracted ${projects.length} live jobs for #${categorySlug}`);
+    return projects;
   } catch (err: any) {
-    console.warn('[PPH Scraper] RSS fetch failed, utilizing global stream fallback:', err.message);
+    console.error('[PPH Scraper] Error:', err.message);
+    return [];
   }
-
-  // 2. High-reliability Global Remote & Freelance API Fallback (Remotive Public API)
-  if (projects.length < limit) {
-    try {
-      const res = await fetch('https://remotive.com/api/remote-jobs?limit=25', {
-        headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' },
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const remotiveJobs = data.jobs || [];
-
-        for (const job of remotiveJobs) {
-          if (projects.length >= limit) break;
-          if (!job.title || !job.url) continue;
-
-          const cat = classifyProjectCategory(`${job.title} ${job.description || ''}`, job.category);
-          if (categorySlug !== 'all' && !isCategoryMatch(cat, categorySlug)) continue;
-
-          const budget = extractCleanBudget(`${job.salary || ''} ${job.title}`);
-
-          projects.push(
-            createUnifiedProject({
-              external_id: `remotive_${job.id}`,
-              platform: 'pph',
-              title: `${job.company_name ? `${job.company_name}: ` : ''}${job.title}`,
-              description: (job.description || job.title).replace(/<[^>]*>/g, '').slice(0, 800),
-              url: job.url,
-              budget: job.salary || budget.budget_text || null,
-              budget_min: budget.budget_min,
-              budget_max: budget.budget_max,
-              currency: budget.currency || '$',
-              language: 'en',
-              category: cat,
-              published_at: job.publication_date ? new Date(job.publication_date).toISOString() : new Date().toISOString(),
-              author: job.company_name || 'Global Client',
-            })
-          );
-        }
-      }
-    } catch (err: any) {
-      console.warn('[PPH Scraper] Global stream fallback failed:', err.message);
-    }
-  }
-
-  console.log(`[PPH Scraper] Extracted ${projects.length} live global opportunities for #${categorySlug}`);
-  return projects;
 }

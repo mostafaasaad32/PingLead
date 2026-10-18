@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { evaluateProjectForAutoBidding } from "@/lib/auto-bidder/engine";
+import { extractTitleFromPostText } from "@/lib/scrapers/types";
 
 export const dynamic = "force-dynamic";
 
@@ -73,8 +74,7 @@ export async function GET(req: NextRequest) {
         budget = item.projects.budget;
         url = item.projects.url || url;
       } else if (item.leads_pool) {
-        const firstLine = (item.leads_pool.post_text || "").split("\n")[0];
-        title = firstLine.replace(/\[.*?\]/g, "").trim() || title;
+        title = extractTitleFromPostText(item.leads_pool.post_text) || title;
         platform = item.leads_pool.platform || platform;
         url = item.leads_pool.post_url || url;
       }

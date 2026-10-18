@@ -1,37 +1,62 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Bell,
   Bot,
   Send,
-  Save,
   CheckCircle2,
   AlertCircle,
   ExternalLink,
-  Zap,
   Info,
-  ShieldCheck,
-  Check,
+  Unlink,
+  Loader2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+
+const POLL_INTERVAL_MS = 3000;
+const POLL_TIMEOUT_MS = 3 * 60 * 1000;
 
 export default function NotificationsSettingsPage() {
   const router = useRouter();
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [waitingForStart, setWaitingForStart] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Notifications State
   const [userId, setUserId] = useState("");
-  const [chatId, setChatId] = useState("");
-  const [connectToken, setConnectToken] = useState("");
+  const [connected, setConnected] = useState(false);
+  const [connectLink, setConnectLink] = useState("");
+  const [botUsername, setBotUsername] = useState("");
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
+  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const fetchConnection = useCallback(async () => {
+    const res = await fetch("/api/telegram/connect", { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "تعذر قراءة حالة ربط تليجرام");
+    setConnected(!!data.connected);
+    setConnectLink(data.link || "");
+    setBotUsername(data.botUsername || "");
+    return data as { connected: boolean };
+  }, []);
+
+  const stopPolling = () => {
+    if (pollTimer.current) clearInterval(pollTimer.current);
+    pollTimer.current = null;
+    setWaitingForStart(false);
+  };
 
   useEffect(() => {
     async function loadSettings() {
@@ -45,88 +70,95 @@ export default function NotificationsSettingsPage() {
           router.push("/login");
           return;
         }
-
         setUserId(user.id);
 
         const { data: profile } = await (supabase
           .from("freelancer_profiles") as any)
-          .select("telegram_chat_id, telegram_connect_token, notifications_enabled")
+          .select("notifications_enabled")
           .eq("user_id", user.id)
           .maybeSingle();
+        if (profile) setNotificationsEnabled(profile.notifications_enabled ?? true);
 
-        if (profile) {
-          setChatId(profile.telegram_chat_id || "");
-          setConnectToken(profile.telegram_connect_token || "");
-          setNotificationsEnabled(profile.notifications_enabled ?? true);
-        }
+        await fetchConnection();
       } catch (err: any) {
         console.error("Error loading notification settings:", err);
-        setErrorMessage("تعذر قراءة إعدادات الإشعارات من قاعدة البيانات.");
+        setErrorMessage(err.message || "تعذر قراءة إعدادات الإشعارات.");
       } finally {
         setLoading(false);
       }
     }
 
     loadSettings();
-  }, [supabase, router]);
+    return () => {
+      if (pollTimer.current) clearInterval(pollTimer.current);
+    };
+  }, [supabase, router, fetchConnection]);
 
-  const handleSave = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!userId) return;
+  // Opens the bot with this account's one-time code, then waits for the user to press Start
+  const handleConnect = () => {
+    if (!connectLink) return;
+    window.open(connectLink, "_blank", "noopener,noreferrer");
 
-    setSaving(true);
-    setToastMessage(null);
     setErrorMessage(null);
+    setWaitingForStart(true);
+    const startedAt = Date.now();
 
+    if (pollTimer.current) clearInterval(pollTimer.current);
+    pollTimer.current = setInterval(async () => {
+      try {
+        const data = await fetchConnection();
+        if (data.connected) {
+          stopPolling();
+          showToast("تم ربط تليجرام بحسابك بنجاح!");
+        } else if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+          stopPolling();
+          setErrorMessage("لم يصل تأكيد من البوت. افتح البوت واضغط Start، ثم اضغط «ربط تليجرام» مرة أخرى.");
+        }
+      } catch {
+        // keep polling; transient network errors are fine
+      }
+    }, POLL_INTERVAL_MS);
+  };
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true);
+    setErrorMessage(null);
     try {
-      const { error } = await (supabase
-        .from("freelancer_profiles") as any)
-        .update({
-          telegram_chat_id: chatId.trim() || null,
-          notifications_enabled: notificationsEnabled,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", userId);
-
-      if (error) throw error;
-
-      setToastMessage("تم حفظ إعدادات إشعارات تليجرام بنجاح!");
-      setTimeout(() => setToastMessage(null), 3500);
+      const res = await fetch("/api/telegram/connect", { method: "DELETE" });
+      if (!res.ok) throw new Error("تعذر فصل تليجرام");
+      await fetchConnection();
+      showToast("تم فصل تليجرام عن حسابك.");
     } catch (err: any) {
-      console.error("Error saving notification settings:", err);
-      setErrorMessage(err.message || "حدث خطأ أثناء حفظ الإعدادات");
+      setErrorMessage(err.message);
     } finally {
-      setSaving(false);
+      setDisconnecting(false);
+    }
+  };
+
+  const handleToggleNotifications = async (enabled: boolean) => {
+    setNotificationsEnabled(enabled);
+    if (!userId) return;
+    const { error } = await (supabase
+      .from("freelancer_profiles") as any)
+      .update({ notifications_enabled: enabled, updated_at: new Date().toISOString() })
+      .eq("user_id", userId);
+    if (error) {
+      setNotificationsEnabled(!enabled);
+      setErrorMessage("تعذر حفظ إعداد التنبيهات.");
+    } else {
+      showToast(enabled ? "تم تفعيل التنبيهات اللحظية." : "تم إيقاف التنبيهات اللحظية.");
     }
   };
 
   const handleSendTestNotification = async () => {
-    if (!chatId.trim()) {
-      setErrorMessage("يرجى إدخال Telegram Chat ID وحفظه أولاً قبل إرسال الإشعار التجريبي.");
-      return;
-    }
-
     setTesting(true);
-    setToastMessage(null);
     setErrorMessage(null);
-
     try {
-      const res = await fetch("/api/notifications/test-telegram", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId: chatId.trim() }),
-      });
-
+      const res = await fetch("/api/notifications/test-telegram", { method: "POST" });
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "فشل إرسال الإشعار التجريبي");
-      }
-
-      setToastMessage(data.message || "تم إرسال إشعار تجريبي إلى حسابك على تليجرام بنجاح!");
-      setTimeout(() => setToastMessage(null), 4000);
+      if (!res.ok) throw new Error(data.error || "فشل إرسال الإشعار التجريبي");
+      showToast(data.message || "تم إرسال إشعار تجريبي إلى تليجرام!");
     } catch (err: any) {
-      console.error("Error testing telegram:", err);
       setErrorMessage(err.message);
     } finally {
       setTesting(false);
@@ -137,16 +169,13 @@ export default function NotificationsSettingsPage() {
     return (
       <div className="vollna-card p-10 text-center bg-white border border-slate-200 rounded-2xl">
         <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-        <p className="text-xs text-slate-500">جاري قراءة إعدادات تليجرام من Supabase...</p>
+        <p className="text-xs text-slate-500">جاري قراءة إعدادات تليجرام...</p>
       </div>
     );
   }
 
-  const isConnected = Boolean(chatId && chatId.trim().length > 0);
-
   return (
     <div className="space-y-6">
-      {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 left-6 z-50 p-4 rounded-2xl bg-slate-900 text-white text-xs font-bold shadow-2xl flex items-center gap-3 border border-emerald-500/30 animate-in fade-in slide-in-from-bottom-3 duration-200">
           <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
@@ -156,7 +185,6 @@ export default function NotificationsSettingsPage() {
         </div>
       )}
 
-      {/* Error Banner */}
       {errorMessage && (
         <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-3">
           <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
@@ -164,187 +192,125 @@ export default function NotificationsSettingsPage() {
         </div>
       )}
 
-      {/* Connection Status Banner */}
+      {/* Connection Card */}
       <div
-        className={`vollna-card p-5 rounded-2xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
-          isConnected
-            ? "bg-emerald-50/60 border-emerald-200/80"
-            : "bg-amber-50/60 border-amber-200/80"
+        className={`vollna-card p-6 sm:p-8 rounded-2xl border transition ${
+          connected ? "bg-emerald-50/60 border-emerald-200/80" : "bg-white border-slate-200"
         }`}
       >
-        <div className="flex items-center gap-3.5">
-          <div
-            className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${
-              isConnected
-                ? "bg-emerald-600 text-white shadow-sm shadow-emerald-600/30"
-                : "bg-amber-500 text-white shadow-sm shadow-amber-500/30"
-            }`}
-          >
-            <Bot className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-extrabold text-slate-900">
-                {isConnected
-                  ? "بوت تليجرام متصل بنجاح"
-                  : "بوت تليجرام غير مربوط بعد"}
-              </h3>
-              <span
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  isConnected
-                    ? "bg-emerald-100 text-emerald-800"
-                    : "bg-amber-100 text-amber-800"
-                }`}
-              >
-                {isConnected ? "متصل" : "مطلوب الربط"}
-              </span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+          <div className="flex items-center gap-3.5">
+            <div
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                connected
+                  ? "bg-emerald-600 text-white shadow-sm shadow-emerald-600/30"
+                  : "bg-slate-900 text-emerald-400"
+              }`}
+            >
+              <Bot className="w-6 h-6" />
             </div>
-            <p className="text-xs text-slate-600 mt-0.5">
-              {isConnected
-                ? `معرف المحادثة المربوط: ${chatId}`
-                : "اربط حسابك لتصلك إشعارات المشاريع فور نشرها في أقل من ثانية."}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <a
-            href="https://t.me/Ping_Lead22_bot"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 text-xs font-bold transition shadow-xs"
-          >
-            <Bot className="w-4 h-4 text-emerald-400" />
-            <span>فتح @Ping_Lead22_bot</span>
-            <ExternalLink className="w-3 h-3 text-slate-400" />
-          </a>
-        </div>
-      </div>
-
-      {/* Main Settings Form */}
-      <div className="vollna-card p-6 sm:p-8 bg-white border border-slate-200 rounded-2xl shadow-xs">
-        <form onSubmit={handleSave} className="space-y-6">
-          {/* Telegram Chat ID Input */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-bold text-slate-900">
-                معرّف محادثة تليجرام (Chat ID)
-              </label>
-              <a
-                href="https://t.me/userinfobot"
-                target="_blank"
-                rel="noreferrer"
-                className="text-[11px] text-emerald-700 font-bold hover:underline flex items-center gap-1"
-              >
-                <span>كيف أحصل على معرف المحادثة (Chat ID)؟</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="مثال: 2135285271"
-                value={chatId}
-                onChange={(e) => setChatId(e.target.value)}
-                className="w-full pl-3 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white transition text-left dir-ltr"
-              />
-              <Bot className="w-4 h-4 text-slate-400 absolute right-3 top-3 pointer-events-none" />
-            </div>
-            <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
-              افتح البوت{" "}
-              <a
-                href="https://t.me/Ping_Lead22_bot"
-                target="_blank"
-                rel="noreferrer"
-                className="text-emerald-700 font-bold hover:underline font-mono"
-              >
-                @Ping_Lead22_bot
-              </a>{" "}
-              واضغط <strong>/start</strong>، ثم ضع الـ Chat ID الخاص بك في الحقل أعلاه.
-            </p>
-          </div>
-
-          {/* Toggle Instant Notifications */}
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
             <div>
-              <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
-                <Bell className="w-4 h-4 text-emerald-600" />
-                <span>تفعيل التنبيهات اللحظية عبر تليجرام</span>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  {connected ? "تليجرام مربوط بحسابك" : "اربط تليجرام لتصلك المشاريع فوراً"}
+                </h3>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    connected ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {connected ? "متصل" : "غير مربوط"}
+                </span>
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                إرسال بطاقة المشروع مع ملخص AI وروابط التقديم المباشرة لحظة رصده.
+              <p className="text-xs text-slate-600 mt-0.5">
+                {connected
+                  ? `التنبيهات تصلك من البوت @${botUsername}`
+                  : waitingForStart
+                  ? "في انتظار ضغطك على Start في البوت..."
+                  : "اضغط الزر، وسيفتح البوت. اضغط Start وسيتم الربط تلقائياً."}
               </p>
             </div>
-
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={notificationsEnabled}
-                onChange={(e) => setNotificationsEnabled(e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
           </div>
 
-          {/* Action Buttons: Save & Test */}
-          <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={handleSendTestNotification}
-              disabled={testing || !chatId.trim()}
-              className="py-2.5 px-5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-xs"
-            >
-              <Send className="w-3.5 h-3.5 text-emerald-600" />
-              <span>{testing ? "جاري الإرسال التجريبي..." : "إرسال إشعار تجريبي فوري"}</span>
-            </button>
-
-            <button
-              type="submit"
-              disabled={saving}
-              className="py-2.5 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              <Save className="w-4 h-4" />
-              <span>{saving ? "جاري الحفظ في Supabase..." : "حفظ الإعدادات"}</span>
-            </button>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            {connected ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleSendTestNotification}
+                  disabled={testing}
+                  className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-2 disabled:opacity-50 shadow-sm shadow-emerald-600/20"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{testing ? "جاري الإرسال..." : "إرسال إشعار تجريبي"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDisconnect}
+                  disabled={disconnecting}
+                  className="py-2.5 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center gap-2 disabled:opacity-50"
+                >
+                  <Unlink className="w-3.5 h-3.5" />
+                  <span>{disconnecting ? "جاري الفصل..." : "فصل تليجرام"}</span>
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={handleConnect}
+                disabled={!connectLink}
+                className="py-3 px-5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold transition flex items-center gap-2 disabled:opacity-50 shadow-sm"
+              >
+                {waitingForStart ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                ) : (
+                  <Bot className="w-4 h-4 text-emerald-400" />
+                )}
+                <span>{waitingForStart ? "فتح البوت مرة أخرى" : "ربط تليجرام"}</span>
+                <ExternalLink className="w-3 h-3 text-slate-400" />
+              </button>
+            )}
           </div>
-        </form>
+        </div>
       </div>
 
-      {/* Guide Card */}
-      <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl">
-        <h4 className="text-xs font-bold text-slate-900 mb-2 flex items-center gap-1.5">
-          <Info className="w-4 h-4 text-emerald-600" />
-          <span>خطوات تشغيل تنبيهات تليجرام في 30 ثانية:</span>
-        </h4>
-        <ol className="text-xs text-slate-600 space-y-2 list-decimal list-inside pr-1">
-          <li>
-            افتح البوت الرسمي على تليجرام:{" "}
-            <a
-              href="https://t.me/Ping_Lead22_bot"
-              target="_blank"
-              rel="noreferrer"
-              className="font-bold text-emerald-700 hover:underline"
-            >
-              @Ping_Lead22_bot
-            </a>
-          </li>
-          <li>اضغط على زر <strong>Start</strong> أو أرسل <strong>/start</strong>.</li>
-          <li>
-            احصل على معرفك (Chat ID) من البوت أو من خلال بوت{" "}
-            <a
-              href="https://t.me/userinfobot"
-              target="_blank"
-              rel="noreferrer"
-              className="text-slate-800 font-bold hover:underline"
-            >
-              @userinfobot
-            </a>
-            .
-          </li>
-          <li>الصق الرقم في الحقل أعلاه واضغط <strong>حفظ الإعدادات</strong> ثم اضغط <strong>إرسال إشعار تجريبي</strong> للتأكد.</li>
-        </ol>
+      {/* Instant notifications toggle */}
+      <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl flex items-center justify-between gap-4">
+        <div>
+          <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
+            <Bell className="w-4 h-4 text-emerald-600" />
+            <span>تفعيل التنبيهات اللحظية عبر تليجرام</span>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            إرسال بطاقة المشروع وروابط التقديم المباشرة لحظة رصده.
+          </p>
+        </div>
+
+        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+          <input
+            id="notifications-enabled"
+            type="checkbox"
+            checked={notificationsEnabled}
+            onChange={(e) => handleToggleNotifications(e.target.checked)}
+            className="sr-only peer"
+          />
+          <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+        </label>
       </div>
+
+      {/* Guide */}
+      {!connected && (
+        <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl">
+          <h4 className="text-xs font-bold text-slate-900 mb-2 flex items-center gap-1.5">
+            <Info className="w-4 h-4 text-emerald-600" />
+            <span>الربط في خطوتين:</span>
+          </h4>
+          <ol className="text-xs text-slate-600 space-y-2 list-decimal list-inside pr-1">
+            <li>اضغط زر <strong>ربط تليجرام</strong> بالأعلى، وسيفتح البوت في تليجرام.</li>
+            <li>اضغط <strong>Start</strong> في البوت. ستتحول هذه الصفحة إلى «متصل» خلال ثوانٍ.</li>
+          </ol>
+        </div>
+      )}
     </div>
   );
 }

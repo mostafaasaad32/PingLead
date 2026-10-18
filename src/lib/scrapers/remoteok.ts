@@ -44,7 +44,9 @@ export async function scrapeRemoteOkCategory(
       const tags: string = Array.isArray(job.tags) ? job.tags.join(' ') : '';
       const fullText = `${job.position} ${tags} ${(job.description || '').replace(/<[^>]*>/g, '')}`;
 
-      const cat = classifyProjectCategory(fullText);
+      // Classify on title + tags only: RemoteOK descriptions are long company boilerplate
+      // that pushed almost every job into ai_data_automation
+      const cat = classifyProjectCategory(`${job.position} ${tags}`);
       if (categorySlug !== 'all' && !isCategoryMatch(cat, categorySlug)) continue;
 
       const title = `${job.company ? `${job.company}: ` : ''}${job.position}`;

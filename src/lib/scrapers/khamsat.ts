@@ -78,7 +78,7 @@ export async function scrapeKhamsatCategory(
       const rawDate = titleTimeMatch ? titleTimeMatch[1] : (agoMatch ? agoMatch[1].trim() : null);
       const publishedAt = parseArabicRelativeDate(rawDate);
 
-      // Budget (Khamsat requests are typically $5 to $50 or custom)
+      // Khamsat requests have no budget field; only use one if the buyer wrote it in the title
       const budget = extractCleanBudget(item.title);
 
       projects.push(
@@ -86,11 +86,11 @@ export async function scrapeKhamsatCategory(
           external_id: item.id,
           platform: 'khamsat',
           title: item.title,
-          description: `المشتري يطلب خدمة مباشرة: ${item.title}`,
+          description: item.title,
           url: exactUrl,
-          budget: budget.budget_text || '5$ - 50$',
-          budget_min: budget.budget_min || 5,
-          budget_max: budget.budget_max || 50,
+          budget: budget.budget_text || null,
+          budget_min: budget.budget_min || null,
+          budget_max: budget.budget_max || null,
           currency: budget.currency || 'USD',
           language: 'ar',
           category: detectedCat,

@@ -5,9 +5,9 @@
 // Zero Cost - Real-time HTML Scraping with resilient fallback
 // ==============================================================================
 
-import { UnifiedProject, createUnifiedProject, ProjectCategory } from './types';
+import { UnifiedProject, createUnifiedProject, ProjectCategory, ProjectInsights } from './types';
 import { parseArabicRelativeDate } from './utils';
-import { classifyProjectCategory, extractCleanBudget } from '../filters/categorizer';
+import { classifyProjectCategory } from '../filters/categorizer';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
 
@@ -85,8 +85,14 @@ export async function scrapeMostaqlCategory(
       const projectId = tMatch[2];
       const cleanTitle = tMatch[3].replace(/<[^>]*>/g, '').trim();
 
-      // Extract card context for brief, author, date, and budget
-      const cardContext = html.slice(tMatch.index, tMatch.index + 3500);
+      // Extract card context for brief, author, date, and budget (stop at the next card)
+      const rawContext = html.slice(tMatch.index, tMatch.index + 3500);
+      const nextCardAt = rawContext.indexOf('class="project-row"', 1);
+      const cardContext = nextCardAt > 0 ? rawContext.slice(0, nextCardAt) : rawContext;
+
+      // Bids so far: <span class="hsoub-file-signature-icon"></span> 3 عروض
+      const bidsMatch = cardContext.match(/hsoub-file-signature-icon"><\/span>\s*(\d+)/i);
+      const bidsCount = bidsMatch ? parseInt(bidsMatch[1], 10) : null;
 
       // Brief
       const briefMatch = cardContext.match(/<p class="text-wrapper-div project__brief\s*"[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>\s*<\/p>/i);
@@ -102,8 +108,8 @@ export async function scrapeMostaqlCategory(
       const rawDate = timeTagMatch ? timeTagMatch[1] : (agoMatch ? agoMatch[1].replace(/<[^>]*>/g, '').trim() : null);
       const publishedAt = parseArabicRelativeDate(rawDate);
 
-      // Budget extraction
-      const budget = extractCleanBudget(`${cleanTitle} ${brief} ${cardContext.slice(0, 500)}`);
+      // No budget here: the listing card doesn't show it, and guessing from the title
+      // picked up numbers like "14 يوم". fetchMostaqlProjectDetails reads the real range.
 
       // Category classification
       const detectedCat = classifyProjectCategory(`${cleanTitle} ${brief}`, categorySlug);
@@ -115,14 +121,15 @@ export async function scrapeMostaqlCategory(
           title: cleanTitle,
           description: brief,
           url: projectUrl,
-          budget: budget.budget_text,
-          budget_min: budget.budget_min,
-          budget_max: budget.budget_max,
-          currency: budget.currency || 'USD',
+          budget: null,
+          budget_min: null,
+          budget_max: null,
+          currency: 'USD',
           language: 'ar',
           category: detectedCat,
           published_at: publishedAt,
           author,
+          insights: { bids_count: bidsCount },
         })
       );
     }
@@ -132,5 +139,70 @@ export async function scrapeMostaqlCategory(
   } catch (err: any) {
     console.error(`[Mostaql Scraper] Error scraping ${categorySlug}:`, err.message);
     return [];
+  }
+}
+
+const stripHtml = (s: string) =>
+  s.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
+
+/**
+ * Reads a Mostaql project page for what the listing doesn't show:
+ * the full description, delivery time, and the client's hiring history.
+ * Returns null when the page can't be read.
+ */
+export interface MostaqlProjectDetails extends ProjectInsights {
+  description?: string;
+  budget_min?: number | null;
+  budget_max?: number | null;
+}
+
+export async function fetchMostaqlProjectDetails(
+  projectUrl: string
+): Promise<MostaqlProjectDetails | null> {
+  try {
+    const res = await fetch(projectUrl, {
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8',
+      },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    const descMatch = html.match(
+      /id="projectDetailsTab"[\s\S]*?<div class="text-wrapper-div carda__content[^"]*"[^>]*>([\s\S]*?)<\/div>/i
+    );
+    const durationMatch = html.match(/مدة التنفيذ<\/div>\s*<div class="meta-value"[^>]*>([\s\S]*?)<\/div>/i);
+
+    // Hire rate is either "85.71%" or "لم يحسب بعد" (no history yet)
+    const hireMatch = html.match(/معدل التوظيف<\/span>\s*<\/td>\s*<td>\s*<label[^>]*>([\s\S]*?)<\/label>/i);
+    const hirePercent = hireMatch?.[1].match(/([\d.]+)\s*%/);
+
+    const openMatch = html.match(/المشاريع المفتوحة<\/span><\/td>\s*<td>\s*(\d+)/i);
+    const progressMatch = html.match(/مشاريع قيد التنفيذ<\/span><\/td>\s*<td>\s*(\d+)/i);
+    const registeredMatch = html.match(/تاريخ التسجيل<\/td>\s*<td>\s*<time>([^<]+)<\/time>/i);
+
+    // Budget isn't on the listing card: data-type= project-budget_range ><span dir="rtl">$25.00 - $50.00</span>
+    const budgetMatch = html.match(/project-budget_range[^>]*>\s*<span[^>]*>([^<]+)<\/span>/i);
+    const budgetNumbers = (budgetMatch?.[1].match(/[\d,]+(?:\.\d+)?/g) || [])
+      .map((n) => parseFloat(n.replace(/,/g, '')))
+      .filter((n) => n > 0);
+
+    return {
+      budget_min: budgetNumbers.length ? Math.min(...budgetNumbers) : null,
+      budget_max: budgetNumbers.length ? Math.max(...budgetNumbers) : null,
+      description: descMatch ? stripHtml(descMatch[1]) : undefined,
+      duration_text: durationMatch ? stripHtml(durationMatch[1]).replace(/\s+/g, ' ') : null,
+      client_hire_rate: hirePercent ? Math.min(100, parseFloat(hirePercent[1])) : null,
+      client_open_projects: openMatch ? parseInt(openMatch[1], 10) : null,
+      client_in_progress: progressMatch ? parseInt(progressMatch[1], 10) : null,
+      client_registered_at: registeredMatch ? registeredMatch[1].trim() : null,
+      details_fetched_at: new Date().toISOString(),
+    };
+  } catch (err: any) {
+    console.warn(`[Mostaql Details] Could not read ${projectUrl}:`, err.message);
+    return null;
   }
 }

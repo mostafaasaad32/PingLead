@@ -90,7 +90,32 @@ export async function scrapeNafezlyCategory(
       if (!cleanTitle || seenIds.has(projectId)) continue;
       seenIds.add(projectId);
 
-      const cardContext = html.slice(match.index, match.index + 7000);
+      // Card context runs until the next (different) project's link
+      const rawContext = html.slice(match.index, match.index + 7000);
+      const nextProjectRegex = /href="https:\/\/nafezly\.com\/project\/(\d+)-/g;
+      let cardEnd = rawContext.length;
+      let np;
+      while ((np = nextProjectRegex.exec(rawContext)) !== null) {
+        if (np[1] !== projectId) {
+          cardEnd = np.index;
+          break;
+        }
+      }
+      const cardContext = rawContext.slice(0, cardEnd);
+
+      // Competition & client signals: <span class="fal fa-ballot ..."></span> 37 عروض
+      const iconText = (icon: string) =>
+        cardContext
+          .match(new RegExp(`${icon}[^"]*"[^>]*><\\/span>\\s*([^<]+)`, 'i'))?.[1]
+          .replace(/\s+/g, ' ')
+          .trim() || null;
+      const bidsText = iconText('fa-ballot');
+      const bidsDigits = bidsText?.match(/\d+/);
+      const insights = {
+        bids_count: bidsDigits ? parseInt(bidsDigits[0], 10) : null,
+        duration_text: iconText('fa-business-time'),
+        client_country: iconText('fa-map-marker-alt'),
+      };
 
       // Extract description
       const descMatch = cardContext.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
@@ -130,6 +155,7 @@ export async function scrapeNafezlyCategory(
           category: detectedCat,
           published_at: publishedAt,
           author,
+          insights,
         })
       );
     }

@@ -4,7 +4,7 @@
 // Siphons live global client projects with verified budgets at $0 API Cost
 // ==============================================================================
 
-import { UnifiedProject, createUnifiedProject, ProjectCategory } from './types';
+import { UnifiedProject, createUnifiedProject, ProjectCategory, estimateBudgetUsd } from './types';
 import { classifyProjectCategory } from '../filters/categorizer';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
@@ -87,6 +87,13 @@ export async function scrapeFreelancerCategory(
           category: cat,
           published_at: p.submitdate ? new Date(p.submitdate * 1000).toISOString() : new Date().toISOString(),
           author: 'Freelancer Client',
+          insights: {
+            bids_count: typeof p.bid_stats?.bid_count === 'number' ? p.bid_stats.bid_count : null,
+            // bid_avg is in the project's currency; store it in USD like budget_usd_estimate
+            bids_avg: typeof p.bid_stats?.bid_avg === 'number'
+              ? estimateBudgetUsd(Math.round(p.bid_stats.bid_avg), currency)
+              : null,
+          },
         })
       );
     }

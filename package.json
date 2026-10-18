@@ -5,11 +5,15 @@
   "type": "module",
   "description": "AI Lead Radar (PingLead) - Real-time Social Intent Lead Engine",
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "worker": "node scripts/worker.mjs",
+    "test:security": "node scripts/smoke_test_security.mjs",
+    "test:security:quick": "node scripts/smoke_test_security.mjs --quick",
+    "bot:dev": "node scripts/telegram_poll_dev.mjs",
     "radar:instant": "node quickstart/instant_radar.mjs"
   },
   "dependencies": {

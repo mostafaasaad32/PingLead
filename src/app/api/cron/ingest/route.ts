@@ -21,6 +21,7 @@ import { UnifiedProject, UserFilter } from '@/lib/scrapers/types';
 import { batchMatchProjects } from '@/lib/matching/filter-matcher';
 import { sendSmartFilterTelegramAlert, dispatchLeadToSubscribers } from '@/lib/telegram/dispatcher';
 import { evaluateProjectForAutoBidding } from '@/lib/auto-bidder/engine';
+import { getProjectPricing, type ProjectPricing } from '@/lib/insights/pricing';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Max execution time for serverless/Edge
@@ -30,13 +31,11 @@ export async function GET(req: NextRequest) {
 
   // 1. Authenticate Cron Trigger
   const authHeader = req.headers.get('authorization');
-  const secretParam = req.nextUrl.searchParams.get('secret');
-  const cronSecret = process.env.CRON_SECRET || 'pinglead_cron_secret_secure_9921';
+  const cronSecret = process.env.CRON_SECRET;
 
   const isAuthorized =
-    authHeader === `Bearer ${cronSecret}` ||
-    secretParam === cronSecret ||
-    process.env.NODE_ENV === 'development';
+    process.env.NODE_ENV === 'development' ||
+    (!!cronSecret && authHeader === `Bearer ${cronSecret}`);
 
   if (!isAuthorized) {
     return NextResponse.json({ error: 'Unauthorized: Invalid CRON_SECRET' }, { status: 401 });
@@ -66,9 +65,18 @@ export async function GET(req: NextRequest) {
     // 3. Ingest projects concurrently across categories
     if (shouldScrape) {
       const targetCategorySlug = req.nextUrl.searchParams.get('category');
+      // Rotate through all active categories, CATEGORIES_PER_CYCLE at a time,
+      // keyed on the current minute so serverless instances agree on the slice.
+      const CATEGORIES_PER_CYCLE = 2;
+      const sortedCategories = [...activeCategories].sort((a, b) => a.slug.localeCompare(b.slug));
+      const sliceCount = Math.max(1, Math.ceil(sortedCategories.length / CATEGORIES_PER_CYCLE));
+      const sliceIndex = Math.floor(Date.now() / 60_000) % sliceCount;
       const categoriesToScrape = targetCategorySlug
         ? activeCategories.filter((c) => c.slug === targetCategorySlug)
-        : activeCategories.slice(0, 2);
+        : sortedCategories.slice(
+            sliceIndex * CATEGORIES_PER_CYCLE,
+            sliceIndex * CATEGORIES_PER_CYCLE + CATEGORIES_PER_CYCLE
+          );
 
       const categoryPromises = categoriesToScrape.map((cat) => ingestCategoryPosts(cat));
       const categoryResults = await Promise.allSettled(categoryPromises);
@@ -178,6 +186,24 @@ export async function GET(req: NextRequest) {
 
         if (!dbProjectId) continue;
 
+        // EGP equivalent + suggested bid, computed lazily once per project (only if an alert goes out)
+        let pricing: ProjectPricing | null | undefined;
+        const getPricing = async () => {
+          if (pricing === undefined) {
+            pricing = await getProjectPricing({
+              platform: project.platform,
+              category: project.category,
+              budget_min: project.budget_min,
+              budget_max: project.budget_max,
+              currency: project.currency,
+              bids_count: project.bids_count,
+              bids_avg: project.bids_avg,
+              duration_text: project.duration_text,
+            }).catch(() => null);
+          }
+          return pricing;
+        };
+
         for (const match of item.matches) {
           matchesFound++;
 
@@ -190,6 +216,7 @@ export async function GET(req: NextRequest) {
             .maybeSingle();
 
           let actionId = existingAction?.id;
+          let isNewAction = false;
 
           if (!actionId) {
             const { data: newAction, error: actionError } = await supabaseAdmin
@@ -205,15 +232,17 @@ export async function GET(req: NextRequest) {
 
             if (!actionError && newAction) {
               actionId = newAction.id;
+              isNewAction = true;
               actionsCreated++;
             }
           }
 
-          // Dispatch Smart Telegram Alert if enabled
+          // Dispatch Smart Telegram Alert only the first time this user matches this project;
+          // scrapers return the same listings every cycle, so existing actions were already alerted.
           const targetFilter = activeFilters.find((f) => f.id === match.filterId);
           const chatId = userTelegramMap.get(match.userId);
 
-          if (actionId && targetFilter?.notify_telegram && chatId) {
+          if (actionId && isNewAction && targetFilter?.notify_telegram && chatId) {
             const sent = await sendSmartFilterTelegramAlert(
               chatId,
               {
@@ -224,6 +253,18 @@ export async function GET(req: NextRequest) {
                 category: project.category,
                 budget: project.budget,
                 budget_usd_estimate: project.budget_usd_estimate,
+                currency: project.currency,
+                pricing: await getPricing(),
+                source_created_at: project.published_at,
+                bids_count: project.bids_count,
+                bids_avg: project.bids_avg,
+                client_hire_rate: project.client_hire_rate,
+                client_open_projects: project.client_open_projects,
+                client_in_progress: project.client_in_progress,
+                client_registered_at: project.client_registered_at,
+                client_country: project.client_country,
+                duration_text: project.duration_text,
+                details_fetched_at: project.details_fetched_at,
               },
               match.filterName,
               actionId
@@ -280,6 +321,7 @@ export async function GET(req: NextRequest) {
       timestamp: new Date().toISOString(),
       duration_ms: durationMs,
       categoriesCount: activeCategories.length,
+      categoriesScraped: ingestionStats.map((s) => s.categorySlug),
       totalProjectsIngested: allIngestedProjects.length,
       activeFiltersCount: activeFilters.length,
       matchesFound,
