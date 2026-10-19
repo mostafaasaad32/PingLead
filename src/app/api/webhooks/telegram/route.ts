@@ -18,6 +18,7 @@ import {
 } from '@/lib/notifications/telegram';
 import { generateContextAwareProposal } from '@/lib/ai/proposal-generator';
 import { getProjectPricing, pricingPromptHint } from '@/lib/insights/pricing';
+import { consumeAiCredit, refundAiCredit, OUT_OF_CREDITS_MESSAGE } from '@/lib/credits';
 import { PortfolioItem, extractTitleFromPostText, extractDetailsFromPostText } from '@/lib/scrapers/types';
 
 export const dynamic = 'force-dynamic';
@@ -371,17 +372,34 @@ export async function POST(req: NextRequest) {
               }).catch(() => null)
             : null;
 
-          const genResult = await generateContextAwareProposal({
-            pricingHint: pricing ? pricingPromptHint(pricing) : undefined,
-            title: projectTitle,
-            description: projectDesc,
-            category: projectCategory,
-            platform: projectPlatform,
-            freelancerBio,
-            freelancerSkills,
-            toneOfVoice,
-            portfolioItems,
-          });
+          // One credit per generated proposal (cached proposals above are free)
+          const credit = await consumeAiCredit(effectiveUserId);
+          if (!credit.ok) {
+            await sendTelegramTextMessage(
+              chatId,
+              `⚠️ ${credit.remaining === 0 ? OUT_OF_CREDITS_MESSAGE : 'تعذر خصم الرصيد، حاول مرة أخرى.'}`
+            );
+            return NextResponse.json({ ok: false, error: 'no_credits' });
+          }
+
+          let genResult;
+          try {
+            genResult = await generateContextAwareProposal({
+              pricingHint: pricing ? pricingPromptHint(pricing) : undefined,
+              title: projectTitle,
+              description: projectDesc,
+              category: projectCategory,
+              platform: projectPlatform,
+              freelancerBio,
+              freelancerSkills,
+              toneOfVoice,
+              portfolioItems,
+            });
+          } catch (err) {
+            await refundAiCredit(effectiveUserId);
+            await sendTelegramTextMessage(chatId, '⚠️ تعذر كتابة العرض دلوقتي (الـ AI مشغول). جرّب تاني بعد دقيقة، ورصيدك ماتخصمش.');
+            return NextResponse.json({ ok: false, error: 'generation_failed' });
+          }
 
           proposalText = genResult.proposal;
 

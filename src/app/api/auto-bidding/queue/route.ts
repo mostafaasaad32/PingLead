@@ -7,8 +7,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { evaluateProjectForAutoBidding } from "@/lib/auto-bidder/engine";
 import { extractTitleFromPostText } from "@/lib/scrapers/types";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { generateContextAwareProposal } from "@/lib/ai/proposal-generator";
+import { getProjectPricing, pricingPromptHint } from "@/lib/insights/pricing";
+import { consumeAiCredit, refundAiCredit, OUT_OF_CREDITS_MESSAGE } from "@/lib/credits";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   try {
@@ -122,6 +127,101 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const { action, id } = body;
+
+    // Action G: Generate the proposal for a queued project (only when the user asks; 1 credit)
+    if (action === "generate") {
+      if (!id) {
+        return NextResponse.json({ error: "معرف المشروع مطلوب" }, { status: 400 });
+      }
+      const { data: item } = await (supabase.from("auto_bid_queue") as any)
+        .select("*, projects(*)")
+        .eq("id", id)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (!item) return NextResponse.json({ error: "المشروع غير موجود في الطابور" }, { status: 404 });
+      if (item.generated_proposal) {
+        return NextResponse.json({ ok: true, proposal: item.generated_proposal, cached: true });
+      }
+
+      const project = item.projects;
+      if (!project) return NextResponse.json({ error: "تفاصيل المشروع غير متاحة" }, { status: 404 });
+
+      const credit = await consumeAiCredit(user.id);
+      if (!credit.ok) {
+        return NextResponse.json(
+          { error: credit.remaining === 0 ? OUT_OF_CREDITS_MESSAGE : "تعذر خصم الرصيد، حاول مرة أخرى." },
+          { status: 402 }
+        );
+      }
+
+      try {
+        const [{ data: profile }, { data: portfolioRows }, { data: template }] = await Promise.all([
+          (supabaseAdmin.from("freelancer_profiles") as any)
+            .select("bio, title, skills, tone_of_voice")
+            .eq("user_id", user.id)
+            .maybeSingle(),
+          (supabaseAdmin.from("portfolio_items") as any).select("*").eq("user_id", user.id),
+          item.template_used_id
+            ? (supabaseAdmin.from("proposal_templates") as any)
+                .select("template_body")
+                .eq("id", item.template_used_id)
+                .maybeSingle()
+            : Promise.resolve({ data: null }),
+        ]);
+
+        const pricing = await getProjectPricing({
+          platform: project.platform,
+          category: project.category,
+          budget_min: project.budget_min,
+          budget_max: project.budget_max,
+          currency: project.currency,
+          bids_count: project.bids_count,
+          bids_avg: project.bids_avg,
+          duration_text: project.duration_text,
+        }).catch(() => null);
+
+        const result = await generateContextAwareProposal({
+          title: project.title,
+          description: project.description,
+          category: project.category,
+          platform: project.platform,
+          freelancerBio: profile?.bio || profile?.title || "",
+          freelancerSkills: profile?.skills || [],
+          toneOfVoice: profile?.tone_of_voice || "confident",
+          customInstructions: template?.template_body
+            ? `استند إلى هذا القالب في صياغة العرض: ${template.template_body}`
+            : undefined,
+          portfolioItems: (portfolioRows || []).map((p: any) => ({
+            id: p.id,
+            user_id: p.user_id,
+            project_title: p.project_title,
+            description: p.description,
+            live_url: p.live_url,
+            tags: p.tags || [],
+            category: p.category,
+          })),
+          pricingHint: pricing ? pricingPromptHint(pricing) : undefined,
+        });
+
+        let proposal = result.proposal;
+        if (item.selected_attachment?.url_or_file) {
+          proposal += `\n\n📌 ${item.selected_attachment.title}: ${item.selected_attachment.url_or_file}`;
+        }
+
+        await (supabase.from("auto_bid_queue") as any)
+          .update({ generated_proposal: proposal, updated_at: new Date().toISOString() })
+          .eq("id", id)
+          .eq("user_id", user.id);
+
+        return NextResponse.json({ ok: true, proposal, remaining_credits: credit.remaining });
+      } catch (err: any) {
+        await refundAiCredit(user.id);
+        return NextResponse.json(
+          { error: "تعذر كتابة العرض دلوقتي (الـ AI مشغول). جرّب تاني، ورصيدك ماتخصمش." },
+          { status: 503 }
+        );
+      }
+    }
 
     // Action A: Approve & Execute 1-Click Auto-Fill
     if (action === "approve") {

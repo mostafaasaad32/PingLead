@@ -104,7 +104,7 @@ FREELANCER PROFILE:
 - Tone of Voice: ${tone} (Write with a ${tone} attitude)
 ${input.customInstructions ? `- Special User Custom Instructions: ${input.customInstructions}` : ''}
 
-${input.pricingHint ? `PRICING GUIDANCE:\n${input.pricingHint}\n` : ''}
+${input.pricingHint ? `PRICING GUIDANCE (REQUIRED):\n${input.pricingHint}\nThe proposal MUST include one explicit sentence with your price and delivery time (e.g. "أقدر أسلّم خلال 7 أيام بتكلفة 150$" / "I can deliver in 7 days for $150"), placed right before the closing question.\n` : ''}
 ${portfolioPromptContext}
 
 Generate the winning pitch proposal now:

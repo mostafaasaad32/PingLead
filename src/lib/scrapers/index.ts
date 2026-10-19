@@ -41,7 +41,7 @@ let insightColumnsAvailable = true;
 
 // Mostaql project pages read per cycle (each is one extra request to mostaql.com)
 const MAX_DETAIL_FETCHES_PER_CYCLE = 8;
-const DETAIL_FETCH_CONCURRENCY = 3;
+const DETAIL_FETCH_CONCURRENCY = 4;
 
 function isMissingColumnError(err: { message?: string; code?: string }): boolean {
   return err.code === '42703' || err.code === 'PGRST204' || /column/i.test(err.message || '');
@@ -62,12 +62,17 @@ async function mergeAndEnrichInsights(projects: UnifiedProject[]): Promise<void>
     byPlatform.set(p.platform, [...(byPlatform.get(p.platform) || []), p.external_id]);
   }
 
-  for (const [platform, ids] of byPlatform) {
-    const { data, error } = await (supabaseAdmin.from('projects') as any)
-      .select(['external_id', 'description', ...BUDGET_KEYS, ...PROJECT_INSIGHT_KEYS].join(','))
-      .eq('platform', platform)
-      .in('external_id', ids);
+  const lookups = await Promise.all(
+    Array.from(byPlatform.entries()).map(async ([platform, ids]) => {
+      const { data, error } = await (supabaseAdmin.from('projects') as any)
+        .select(['external_id', 'description', ...BUDGET_KEYS, ...PROJECT_INSIGHT_KEYS].join(','))
+        .eq('platform', platform)
+        .in('external_id', ids);
+      return { platform, data, error };
+    })
+  );
 
+  for (const { platform, data, error } of lookups) {
     if (error) {
       if (isMissingColumnError(error)) {
         insightColumnsAvailable = false;

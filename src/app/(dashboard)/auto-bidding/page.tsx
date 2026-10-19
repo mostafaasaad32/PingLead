@@ -100,6 +100,7 @@ export default function AutoBiddingPage() {
   const [queue, setQueue] = useState<AutoBidQueueItem[]>([]);
   const [templates, setTemplates] = useState<ProposalTemplateOption[]>([]);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // New Attachment Modal
@@ -210,7 +211,34 @@ export default function AutoBiddingPage() {
     await handleSaveConfig(nextState);
   };
 
-  // 1-Click Approve, Copy & Open Job
+  // Generate the proposal for one queued project (the only place the AI runs; 1 credit)
+  const handleGenerate = async (item: AutoBidQueueItem) => {
+    setGeneratingId(item.id);
+    try {
+      const res = await fetch("/api/auto-bidding/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate", id: item.id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.proposal) {
+        showToast("⚠️ " + (data.error || "تعذر توليد العرض"));
+        return;
+      }
+      setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, generated_proposal: data.proposal } : q)));
+      showToast(
+        typeof data.remaining_credits === "number"
+          ? `✍️ العرض جاهز. رصيدك المتبقي: ${data.remaining_credits}`
+          : "✍️ العرض جاهز"
+      );
+    } catch {
+      showToast("⚠️ تعذر الاتصال بمولد العروض.");
+    } finally {
+      setGeneratingId(null);
+    }
+  };
+
+  // Copy the proposal, mark as applied, and open the project page (the user submits it)
   const handleApprove1Click = async (item: AutoBidQueueItem) => {
     setProcessingId(item.id);
 
@@ -398,7 +426,7 @@ export default function AutoBiddingPage() {
               <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto mb-2 opacity-80" />
               <p className="text-xs font-bold text-slate-700">الطابور فارغ حالياً — كل شيء تحت السيطرة!</p>
               <p className="text-[11px] text-slate-400 mt-1 max-w-md mx-auto">
-                عندما يرصد الرادار مشروعاً جديداً يتجاوز {minMatchScore}% توافق، سيظهر هنا العرض المكتوب بالكامل لتعتمده بنقرة واحدة.
+                عندما يرصد الرادار مشروعاً جديداً يتجاوز {minMatchScore}% توافق، سيظهر هنا. ولّد العرض بالـ AI بضغطة، راجعه، وقدّم بنفسك.
               </p>
             </div>
           ) : (
@@ -440,35 +468,48 @@ export default function AutoBiddingPage() {
                       </a>
                     </h3>
 
-                    <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed bg-white p-2.5 rounded-xl border border-slate-100">
-                      "{item.generated_proposal}"
-                    </p>
+                    {item.generated_proposal ? (
+                      <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed bg-white p-2.5 rounded-xl border border-slate-100 whitespace-pre-line">
+                        {item.generated_proposal}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 bg-white p-2.5 rounded-xl border border-dashed border-slate-200">
+                        العرض لسه متكتبش. اضغط «ولّد العرض» لما تقرر تقدّم (رصيد واحد).
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 self-end lg:self-center shrink-0">
                     <button
                       type="button"
                       onClick={() => handleReject(item.id)}
-                      disabled={processingId === item.id}
+                      disabled={processingId === item.id || generatingId === item.id}
                       className="py-2.5 px-3.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-bold transition flex items-center gap-1.5"
                     >
                       <X className="w-3.5 h-3.5" />
                       <span>تخطي</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => handleApprove1Click(item)}
-                      disabled={processingId === item.id}
-                      className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition flex items-center gap-2"
-                    >
-                      <Zap className="w-3.5 h-3.5 fill-white" />
-                      <span>
-                        {processingId === item.id
-                          ? "جاري المعالجة..."
-                          : "🚀 ملء تلقائي وإرسال فوري"}
-                      </span>
-                    </button>
+                    {item.generated_proposal ? (
+                      <button
+                        type="button"
+                        onClick={() => handleApprove1Click(item)}
+                        disabled={processingId === item.id}
+                        className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition flex items-center gap-2"
+                      >
+                        <Zap className="w-3.5 h-3.5 fill-white" />
+                        <span>{processingId === item.id ? "جاري المعالجة..." : "📋 انسخ العرض وافتح المشروع"}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleGenerate(item)}
+                        disabled={generatingId === item.id}
+                        className="py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition flex items-center gap-2 disabled:opacity-60"
+                      >
+                        <span>{generatingId === item.id ? "جاري كتابة العرض..." : "✍️ ولّد العرض بالـ AI"}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -715,26 +756,13 @@ export default function AutoBiddingPage() {
             </div>
 
             {/* Review Mode Toggle */}
-            <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
-              <div>
-                <span className="text-xs font-bold text-slate-800">وضع المراجعة المسبقة:</span>
-                <p className="text-[10px] text-slate-500">
-                  {reviewMode === "require_approval"
-                    ? "يتطلب موافقتك السريعة بنقرة واحدة"
-                    : "إرسال مباشر تلقائي 100%"}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() =>
-                  setReviewMode((prev) =>
-                    prev === "require_approval" ? "full_auto" : "require_approval"
-                  )
-                }
-                className="py-1 px-3 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700"
-              >
-                تبديل الوضع
-              </button>
+            {/* Proposals are never sent automatically: Arab platforms have no official way to
+                submit for the user, and automated submissions can get accounts banned. */}
+            <div className="pt-2 border-t border-slate-200">
+              <span className="text-xs font-bold text-slate-800">المراجعة قبل التقديم:</span>
+              <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
+                دايماً انت اللي بتقدّم. الإرسال التلقائي ممكن يقفل حسابك على المنصات، عشان كده العرض بيتجهز ويستناك.
+              </p>
             </div>
           </div>
         </div>

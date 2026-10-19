@@ -11,6 +11,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { PortfolioItem, extractTitleFromPostText, extractDetailsFromPostText } from '@/lib/scrapers/types';
 import { generateContextAwareProposal } from '@/lib/ai/proposal-generator';
 import { getProjectPricing, pricingPromptHint } from '@/lib/insights/pricing';
+import { consumeAiCredit, refundAiCredit, OUT_OF_CREDITS_MESSAGE } from '@/lib/credits';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -150,41 +151,34 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Generate proposal via context-aware AI engine
-    const result = await generateContextAwareProposal({
-      title,
-      description,
-      category,
-      platform,
-      freelancerBio: effectiveBio,
-      freelancerSkills: effectiveSkills,
-      toneOfVoice: effectiveTone,
-      customInstructions: custom_instructions,
-      portfolioItems,
-      pricingHint: pricing ? pricingPromptHint(pricing) : undefined,
-    });
+    // 4. Spend one credit up front (atomic), refunded if generation fails
+    const credit = await consumeAiCredit(effectiveUserId);
+    if (!credit.ok) {
+      return NextResponse.json(
+        { error: credit.remaining === 0 ? OUT_OF_CREDITS_MESSAGE : 'تعذر خصم الرصيد، حاول مرة أخرى.' },
+        { status: 402 }
+      );
+    }
+    const remainingCredits = credit.remaining;
 
-    // 4.5. Deduct 1 credit from freelancer_profiles in Supabase
-    let remainingCredits: number | null = null;
-    if (effectiveUserId) {
-      try {
-        const { data: prof } = await (supabaseAdmin
-          .from('freelancer_profiles') as any)
-          .select('ai_credits')
-          .eq('user_id', effectiveUserId)
-          .maybeSingle();
-
-        if (prof && typeof prof.ai_credits === 'number' && prof.ai_credits > 0) {
-          const newCredit = prof.ai_credits - 1;
-          await (supabaseAdmin
-            .from('freelancer_profiles') as any)
-            .update({ ai_credits: newCredit, updated_at: new Date().toISOString() })
-            .eq('user_id', effectiveUserId);
-          remainingCredits = newCredit;
-        }
-      } catch (err: any) {
-        console.warn('[AI Proposal Generator] Credit deduction error:', err.message);
-      }
+    // 4.5. Generate proposal via context-aware AI engine
+    let result;
+    try {
+      result = await generateContextAwareProposal({
+        title,
+        description,
+        category,
+        platform,
+        freelancerBio: effectiveBio,
+        freelancerSkills: effectiveSkills,
+        toneOfVoice: effectiveTone,
+        customInstructions: custom_instructions,
+        portfolioItems,
+        pricingHint: pricing ? pricingPromptHint(pricing) : undefined,
+      });
+    } catch (err) {
+      await refundAiCredit(effectiveUserId);
+      throw err;
     }
 
     // 5. Save Proposal to user_project_actions (Mini-CRM)

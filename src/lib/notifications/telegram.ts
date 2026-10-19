@@ -12,6 +12,29 @@ import type { ProjectPricing } from '@/lib/insights/pricing';
 import { getCompetitionVerdict, getClientVerdict } from '@/lib/insights/competition';
 
 /**
+ * "نُشر منذ 3 دقائق" - how fresh the project is when the alert goes out (speed is the product).
+ * Returns '' for missing/invalid dates.
+ */
+export function formatPostedAgo(iso: string | null | undefined, now: number = Date.now()): string {
+  if (!iso) return '';
+  const time = new Date(iso).getTime();
+  if (isNaN(time)) return '';
+  const minutes = Math.max(0, Math.floor((now - time) / 60000));
+  if (minutes < 1) return 'نُشر الآن';
+  if (minutes === 1) return 'نُشر منذ دقيقة';
+  if (minutes === 2) return 'نُشر منذ دقيقتين';
+  if (minutes <= 10) return `نُشر منذ ${minutes} دقائق`;
+  if (minutes < 60) return `نُشر منذ ${minutes} دقيقة`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return 'نُشر منذ ساعة';
+  if (hours === 2) return 'نُشر منذ ساعتين';
+  if (hours <= 10) return `نُشر منذ ${hours} ساعات`;
+  if (hours < 24) return `نُشر منذ ${hours} ساعة`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? 'نُشر منذ يوم' : days === 2 ? 'نُشر منذ يومين' : `نُشر منذ ${days} أيام`;
+}
+
+/**
  * Competition, client and delivery-time lines for an alert card (empty when the platform gives nothing).
  */
 export function formatInsightLines(p: ProjectInsights): string {
@@ -122,31 +145,18 @@ export async function sendSmartFilterTelegramAlert(
     : '';
   const platformLabel = getPlatformBadge(project.platform, project.url);
 
-  let dateInfo = '';
-  if (project.source_created_at) {
-    try {
-      const date = new Date(project.source_created_at);
-      if (!isNaN(date.getTime())) {
-        const timeStr = date.toLocaleTimeString('ar-EG', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: true,
-        });
-        dateInfo = `\n⏰ <b>وقت النشر بالمنصة:</b> ${timeStr}`;
-      }
-    } catch (e) {
-      // ignore
-    }
-  }
+  // Freshness right under the title: how fast the alert arrived is the point of the product
+  const freshness = formatPostedAgo(project.source_created_at);
 
   const message =
     `🎯 <b>تنبيه فلتر ذكي: ${escapeHtml(filterName)}</b>\n\n` +
     `💼 <b>${cleanTitle}</b>\n` +
+    (freshness ? `⏱️ <b>${freshness}</b>\n` : '') +
     `📍 <b>المنصة:</b> ${platformLabel}\n` +
     `💰 <b>الميزانية:</b> ${escapeHtml(budgetInfo)}` +
     `${suggestionLine}` +
     `${formatInsightLines(project)}\n` +
-    `🏷️ <b>التصنيف:</b> #${project.category}${dateInfo}\n\n` +
+    `🏷️ <b>التصنيف:</b> #${project.category}\n\n` +
     `📝 <b>الوصف:</b>\n` +
     `"${cleanSnippet}..."\n\n` +
     `⚡ اضغط أدناه لتوليد عرض تقديم احترافي بالـ AI فوراً بناءً على سابقة أعمالك:`;

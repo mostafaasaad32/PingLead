@@ -182,6 +182,13 @@ export const PLATFORMS_METADATA: PlatformMetadata[] = [
   },
 ];
 
+/**
+ * Remote job boards (mostly full-time roles, no bids). Kept out of filters unless the
+ * user turns them on, so alerts stay freelance projects by default.
+ */
+export const JOB_BOARD_PLATFORMS: FreelancePlatform[] = ['baeed', 'remoteok', 'wwr'];
+export const isJobBoard = (platform: string) => JOB_BOARD_PLATFORMS.includes(platform as FreelancePlatform);
+
 // ==============================================================================
 // Metadata for 14 Categories
 // ==============================================================================

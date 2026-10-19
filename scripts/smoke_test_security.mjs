@@ -97,6 +97,12 @@ try {
   expectStatus("S2", "Proposal generation rejects anonymous requests", status, 401);
 }
 
+// Leads feed requires login
+{
+  const { status } = await request("GET", "/api/leads?limit=1");
+  expectStatus("S7", "Leads feed rejects anonymous requests", status, 401);
+}
+
 // S5: manual scan requires login
 {
   const { status } = await request("POST", "/api/scan");

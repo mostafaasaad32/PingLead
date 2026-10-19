@@ -47,6 +47,7 @@ import {
   CategoryType,
   PlatformMetadata,
   CategoryMetadata,
+  isJobBoard,
 } from "@/lib/scrapers/types";
 import { isCategoryMatch } from "@/lib/filters/categorizer";
 
@@ -55,9 +56,12 @@ const PLATFORM_MAP = new Map<string, PlatformMetadata>(
   PLATFORMS_METADATA.map((p) => [p.id, p])
 );
 
-const ALL_PLATFORMS = PLATFORMS_METADATA.map((p) => p.id);
-const ARAB_PLATFORMS = PLATFORMS_METADATA.filter((p) => p.region === "arab");
-const GLOBAL_PLATFORMS = PLATFORMS_METADATA.filter((p) => p.region === "global");
+// Freelance marketplaces are on by default; remote job boards (full-time roles) are opt-in
+const FREELANCE_PLATFORMS = PLATFORMS_METADATA.filter((p) => !isJobBoard(p.id));
+const JOB_BOARDS = PLATFORMS_METADATA.filter((p) => isJobBoard(p.id));
+const ALL_PLATFORMS = FREELANCE_PLATFORMS.map((p) => p.id);
+const ARAB_PLATFORMS = FREELANCE_PLATFORMS.filter((p) => p.region === "arab");
+const GLOBAL_PLATFORMS = FREELANCE_PLATFORMS.filter((p) => p.region === "global");
 const ALL_CATEGORIES = CATEGORIES_METADATA.map((c) => c.id);
 
 interface FilterItem {
@@ -298,16 +302,19 @@ export default function JobFiltersWorkspace() {
     }
   };
 
+  // Quick selects change the freelance platforms and keep the user's job-board choice as is
+  const keepJobBoards = (ids: string[]) => [...ids, ...selectedPlatforms.filter((p) => isJobBoard(p))];
+
   const selectOnlyArabPlatforms = () => {
-    setSelectedPlatforms(ARAB_PLATFORMS.map((p) => p.id));
+    setSelectedPlatforms(keepJobBoards(ARAB_PLATFORMS.map((p) => p.id)));
   };
 
   const selectOnlyGlobalPlatforms = () => {
-    setSelectedPlatforms(GLOBAL_PLATFORMS.map((p) => p.id));
+    setSelectedPlatforms(keepJobBoards(GLOBAL_PLATFORMS.map((p) => p.id)));
   };
 
   const selectAllPlatforms = () => {
-    setSelectedPlatforms(ALL_PLATFORMS);
+    setSelectedPlatforms(keepJobBoards(ALL_PLATFORMS));
   };
 
   // Category Checkbox Toggles
@@ -616,15 +623,12 @@ export default function JobFiltersWorkspace() {
         if (data.ok && data.proposal) {
           setGeneratedProposalText(data.proposal);
         } else {
-          setGeneratedProposalText(
-            `مرحباً بك، اطلعت على متطلبات مشروعك "${project.title}" بعناية ولدي الخبرة العملية التامة لتنفيذه بأعلى المعايير وفي أسرع وقت. يسعدني مناقشة التفاصيل معك فوراً.`
-          );
+          // Show the real reason (e.g. out of credits) instead of a canned text the user might send
+          setGeneratedProposalText("⚠️ تعذر توليد العرض: " + (data.error || "حاول مرة أخرى"));
         }
       })
       .catch(() => {
-        setGeneratedProposalText(
-          `مرحباً بك، اطلعت على متطلبات مشروعك "${project.title}" بعناية ولدي الخبرة العملية التامة لتنفيذه بأعلى المعايير. يسعدني بدء العمل معك فوراً.`
-        );
+        setGeneratedProposalText("⚠️ تعذر الاتصال بمولد العروض. حاول مرة أخرى.");
       })
       .finally(() => {
         setGeneratingProposal(false);
@@ -1075,6 +1079,44 @@ export default function JobFiltersWorkspace() {
                             {plat.icon_letter}
                           </span>
                           <span className="truncate">{plat.label_en}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Remote job boards: full-time roles, opt-in */}
+                <div className="rounded-xl border border-dashed border-slate-200 p-2.5 space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">
+                    💼 وظائف عن بعد (دوام كامل)
+                  </label>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    مواقع وظائف مش مشاريع فريلانس، ومفيهاش عروض. مقفولة افتراضياً عشان تنبيهاتك تفضل مشاريع بس.
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {JOB_BOARDS.map((plat) => {
+                      const isChecked = selectedPlatforms.includes(plat.id);
+                      return (
+                        <label
+                          key={plat.id}
+                          className={`flex items-center gap-1.5 p-1.5 rounded-lg border text-[11px] cursor-pointer transition ${
+                            isChecked
+                              ? "bg-slate-50 border-slate-300 text-slate-900 font-bold"
+                              : "bg-white border-slate-100 text-slate-400 opacity-60"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => togglePlatform(plat.id)}
+                            className="sr-only"
+                          />
+                          <span
+                            className={`w-4.5 h-4.5 rounded flex items-center justify-center text-[9px] font-bold shrink-0 ${plat.badge_color} ${plat.text_color}`}
+                          >
+                            {plat.icon_letter}
+                          </span>
+                          <span className="truncate">{plat.region === "arab" ? plat.label_ar.split(" ")[0] : plat.label_en}</span>
                         </label>
                       );
                     })}

@@ -26,6 +26,20 @@ import { getProjectPricing, type ProjectPricing } from '@/lib/insights/pricing';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Max execution time for serverless/Edge
 
+/** Runs fn over items with at most `limit` in flight; results keep input order. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]).catch(() => undefined as unknown as R);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 export async function GET(req: NextRequest) {
   const startTime = Date.now();
 
@@ -155,37 +169,59 @@ export async function GET(req: NextRequest) {
     let smartTelegramDispatched = 0;
 
     if (matchMap.size > 0) {
-      for (const [_, item] of matchMap.entries()) {
-        const project = item.project;
+      const items = Array.from(matchMap.values());
 
-        // Retrieve the DB project id (or fallback to leads_pool id)
-        let dbProjectId: string | null = null;
-        const { data: existingProj } = await supabaseAdmin
-          .from('projects')
-          .select('id')
-          .eq('platform', project.platform)
-          .eq('external_id', project.external_id)
-          .maybeSingle();
+      // 6a. Resolve DB project ids: one query per platform instead of one per project
+      const projectIdByKey = new Map<string, string>();
+      const idsByPlatform = new Map<string, string[]>();
+      for (const { project } of items) {
+        idsByPlatform.set(project.platform, [...(idsByPlatform.get(project.platform) || []), project.external_id]);
+      }
+      await Promise.all(
+        Array.from(idsByPlatform.entries()).map(async ([platform, externalIds]) => {
+          const { data } = await (supabaseAdmin.from('projects') as any)
+            .select('id, external_id')
+            .eq('platform', platform)
+            .in('external_id', externalIds);
+          for (const row of data || []) projectIdByKey.set(`${platform}_${row.external_id}`, row.id);
+        })
+      );
 
-        if (existingProj?.id) {
-          dbProjectId = existingProj.id;
-        } else {
-          const { data: existingLead } = await supabaseAdmin
-            .from('leads_pool')
-            .select('id')
-            .eq('platform', project.platform)
-            .eq('external_post_id', project.external_post_id || `${project.platform}_${project.external_id}`)
-            .maybeSingle();
-          if (existingLead?.id) dbProjectId = existingLead.id;
+      // 6b. One new CRM row per (user, project). Bulk upsert with ignoreDuplicates returns only
+      //     rows that didn't exist yet, so existing matches (already alerted) are skipped in one round trip.
+      const candidates = new Map<string, { user_id: string; project_id: string; matched_filter_id: string }>();
+      const matchByCandidate = new Map<string, { item: (typeof items)[number]; match: (typeof items)[number]['matches'][number] }>();
+      for (const item of items) {
+        const projectId = projectIdByKey.get(`${item.project.platform}_${item.project.external_id}`);
+        if (!projectId) continue;
+        for (const match of item.matches) {
+          matchesFound++;
+          const key = `${match.userId}_${projectId}`;
+          if (candidates.has(key)) continue; // same user matched by two filters: alert once
+          candidates.set(key, { user_id: match.userId, project_id: projectId, matched_filter_id: match.filterId });
+          matchByCandidate.set(key, { item, match });
         }
+      }
 
-        if (!dbProjectId) continue;
+      const newActions: { id: string; user_id: string; project_id: string }[] = [];
+      const rows = Array.from(candidates.values()).map((c) => ({ ...c, status: 'saved' }));
+      for (let i = 0; i < rows.length; i += 500) {
+        const { data, error } = await (supabaseAdmin.from('user_project_actions') as any)
+          .upsert(rows.slice(i, i + 500), { onConflict: 'user_id,project_id', ignoreDuplicates: true })
+          .select('id, user_id, project_id');
+        if (error) console.warn('[Cron Ingest] CRM insert error:', error.message);
+        newActions.push(...(data || []));
+      }
+      actionsCreated = newActions.length;
 
-        // EGP equivalent + suggested bid, computed lazily once per project (only if an alert goes out)
-        let pricing: ProjectPricing | null | undefined;
-        const getPricing = async () => {
-          if (pricing === undefined) {
-            pricing = await getProjectPricing({
+      // 6c. Alerts for new matches only, 10 at a time
+      const pricingByProject = new Map<string, Promise<ProjectPricing | null>>();
+      const pricingFor = (project: UnifiedProject) => {
+        const key = `${project.platform}_${project.external_id}`;
+        if (!pricingByProject.has(key)) {
+          pricingByProject.set(
+            key,
+            getProjectPricing({
               platform: project.platform,
               category: project.category,
               budget_min: project.budget_min,
@@ -194,89 +230,62 @@ export async function GET(req: NextRequest) {
               bids_count: project.bids_count,
               bids_avg: project.bids_avg,
               duration_text: project.duration_text,
-            }).catch(() => null);
-          }
-          return pricing;
-        };
-
-        for (const match of item.matches) {
-          matchesFound++;
-
-          // Check if an action already exists in user_project_actions
-          const { data: existingAction } = await supabaseAdmin
-            .from('user_project_actions')
-            .select('id')
-            .eq('user_id', match.userId)
-            .eq('project_id', dbProjectId)
-            .maybeSingle();
-
-          let actionId = existingAction?.id;
-          let isNewAction = false;
-
-          if (!actionId) {
-            const { data: newAction, error: actionError } = await supabaseAdmin
-              .from('user_project_actions')
-              .insert({
-                user_id: match.userId,
-                project_id: dbProjectId,
-                status: 'saved',
-                matched_filter_id: match.filterId,
-              })
-              .select('id')
-              .single();
-
-            if (!actionError && newAction) {
-              actionId = newAction.id;
-              isNewAction = true;
-              actionsCreated++;
-            }
-          }
-
-          // Dispatch Smart Telegram Alert only the first time this user matches this project;
-          // scrapers return the same listings every cycle, so existing actions were already alerted.
-          const targetFilter = activeFilters.find((f) => f.id === match.filterId);
-          const chatId = userTelegramMap.get(match.userId);
-
-          if (actionId && isNewAction && targetFilter?.notify_telegram && chatId) {
-            const sent = await sendSmartFilterTelegramAlert(
-              chatId,
-              {
-                title: project.title,
-                description: project.description,
-                url: project.url,
-                platform: project.platform,
-                category: project.category,
-                budget: project.budget,
-                budget_usd_estimate: project.budget_usd_estimate,
-                currency: project.currency,
-                pricing: await getPricing(),
-                source_created_at: project.published_at,
-                bids_count: project.bids_count,
-                bids_avg: project.bids_avg,
-                client_hire_rate: project.client_hire_rate,
-                client_open_projects: project.client_open_projects,
-                client_in_progress: project.client_in_progress,
-                client_registered_at: project.client_registered_at,
-                client_country: project.client_country,
-                duration_text: project.duration_text,
-                details_fetched_at: project.details_fetched_at,
-              },
-              match.filterName,
-              actionId
-            );
-
-            if (sent) smartTelegramDispatched++;
-          }
+            }).catch(() => null)
+          );
         }
+        return pricingByProject.get(key)!;
+      };
 
-        // 6b. Evaluate project for Auto-Bidding engine
+      const alertJobs = newActions
+        .map((action) => ({ action, ...matchByCandidate.get(`${action.user_id}_${action.project_id}`)! }))
+        .filter(({ match }) => {
+          const filter = activeFilters.find((f) => f.id === match.filterId);
+          return filter?.notify_telegram && userTelegramMap.has(match.userId);
+        });
+
+      const results = await mapWithConcurrency(alertJobs, 10, async ({ action, item, match }) => {
+        const project = item.project;
+        return sendSmartFilterTelegramAlert(
+          userTelegramMap.get(match.userId)!,
+          {
+            title: project.title,
+            description: project.description,
+            url: project.url,
+            platform: project.platform,
+            category: project.category,
+            budget: project.budget,
+            budget_usd_estimate: project.budget_usd_estimate,
+            currency: project.currency,
+            pricing: await pricingFor(project),
+            source_created_at: project.published_at,
+            bids_count: project.bids_count,
+            bids_avg: project.bids_avg,
+            client_hire_rate: project.client_hire_rate,
+            client_open_projects: project.client_open_projects,
+            client_in_progress: project.client_in_progress,
+            client_registered_at: project.client_registered_at,
+            client_country: project.client_country,
+            duration_text: project.duration_text,
+            details_fetched_at: project.details_fetched_at,
+          },
+          match.filterName,
+          action.id
+        );
+      });
+      smartTelegramDispatched = results.filter(Boolean).length;
+
+      // 6d. Auto-Bidding: only projects that are new matches this cycle
+      const newProjectIds = new Set(newActions.map((a) => a.project_id));
+      for (const item of items) {
+        const projectId = projectIdByKey.get(`${item.project.platform}_${item.project.external_id}`);
+        if (!projectId || !newProjectIds.has(projectId)) continue;
         evaluateProjectForAutoBidding({
-          id: dbProjectId,
-          title: project.title,
-          description: project.description,
-          platform: project.platform,
-          url: project.url,
-          category: project.category,
+          id: projectId,
+          title: item.project.title,
+          description: item.project.description,
+          platform: item.project.platform,
+          url: item.project.url,
+          category: item.project.category,
         }).catch((err) => console.error('[AutoBidder Ingest Hook Error]:', err));
       }
     }

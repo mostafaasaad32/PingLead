@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { PLATFORMS_METADATA, PROJECT_INSIGHT_KEYS } from '@/lib/scrapers/types';
 import { triggerIngest, pageLoadTriggersEnabled } from '@/lib/cron/trigger';
 import { getRates } from '@/lib/currency/rates';
@@ -69,6 +70,15 @@ async function attachProjectInsights(leads: any[]): Promise<any[]> {
 
 export async function GET(req: NextRequest) {
   try {
+    // Signed-in users only: this reads with the service key and returns the whole project feed
+    const supabase = await createServerSupabaseClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: 'غير مصرح - يرجى تسجيل الدخول' }, { status: 401 });
+    }
+
     // Non-blocking auto-scrape for self-hosted/local runs (rate-limited to once per 60s inside triggerIngest).
     // On Vercel the external cron does this instead.
     if (pageLoadTriggersEnabled) triggerIngest(true).catch(() => {});

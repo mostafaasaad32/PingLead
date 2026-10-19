@@ -4,7 +4,7 @@
 // High-performance, in-memory matching with Arabic normalization and negative keyword rejection.
 // ==============================================================================
 
-import { UnifiedProject, UserFilter, ProjectCategory, FreelancePlatform } from '../scrapers/types';
+import { UnifiedProject, UserFilter, ProjectCategory, FreelancePlatform, isJobBoard } from '../scrapers/types';
 import { isCategoryMatch } from '../filters/categorizer';
 
 export interface FilterMatchResult {
@@ -80,8 +80,14 @@ export function evaluateProjectAgainstFilter(
     return baseResult;
   }
 
-  // 2. Platform match (Empty platforms array means ALL 9 platforms are accepted)
-  if (filter.platforms && filter.platforms.length > 0) {
+  // 2. Platform match. Empty array = every freelance platform; remote job boards
+  //    (full-time roles) only match when the user explicitly selects them.
+  if (!filter.platforms || filter.platforms.length === 0) {
+    if (isJobBoard(project.platform)) {
+      baseResult.reasons.push(`Job board ${project.platform} not selected`);
+      return baseResult;
+    }
+  } else {
     const platformMatch = filter.platforms.some(
       (p) => p.toLowerCase() === project.platform.toLowerCase()
     );

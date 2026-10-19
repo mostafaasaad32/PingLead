@@ -197,7 +197,7 @@ export async function sendTelegramAutoBidNotification(
     platform: string;
     platform_url: string;
     match_score: number;
-    generated_proposal: string;
+    reasons?: string[];
     attachment_title?: string;
   }
 ) {
@@ -208,23 +208,22 @@ export async function sendTelegramAutoBidNotification(
     (str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   const cleanTitle = escapeHtml(queueItem.project_title.slice(0, 100));
-  const snippet = escapeHtml(queueItem.generated_proposal.slice(0, 250));
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://pinglead.vercel.app";
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://ping-lead.vercel.app";
 
   const messageText =
-    `⚡ <b>عرض Auto-Bidding جاهز للإرسال (${queueItem.match_score}% تطابق)</b>\n\n` +
+    `⚡ <b>مشروع مطابق لقواعد الـ Auto-Bidding (${queueItem.match_score}% توافق)</b>\n\n` +
     `📁 <b>المشروع:</b> <a href="${queueItem.platform_url}">${cleanTitle}</a>\n` +
     `🌐 <b>المنصة:</b> ${queueItem.platform.toUpperCase()}\n` +
-    (queueItem.attachment_title ? `📎 <b>المرفق:</b> ${escapeHtml(queueItem.attachment_title)}\n` : "") +
-    `\n📝 <b>ملخص العرض المقترح:</b>\n<i>"${snippet}..."</i>\n\n` +
-    `اضغط على الزر أدناه للموافقة والفتح مع الملء التلقائي بنقرة واحدة!`;
+    (queueItem.reasons?.length ? `✅ ${escapeHtml(queueItem.reasons.join(" · "))}\n` : "") +
+    (queueItem.attachment_title ? `📎 <b>المرفق المقترح:</b> ${escapeHtml(queueItem.attachment_title)}\n` : "") +
+    `\nالمشروع مستنيك في الطابور: ولّد العرض بالـ AI (رصيد واحد) وراجعه وقدّم بنفسك.`;
 
   const inlineKeyboard = {
     inline_keyboard: [
       [
         {
-          text: "🚀 الموافقة والفتح مع الملء التلقائي (1-Click)",
-          url: `${siteUrl}/auto-bidding?action=approve&id=${queueItem.id}`,
+          text: "✍️ افتح الطابور وولّد العرض",
+          url: `${siteUrl}/auto-bidding`,
         },
       ],
       [
@@ -294,11 +293,6 @@ export async function evaluateProjectForAutoBidding(project: {
     for (const cfg of configs) {
       const userProfile = profileMap.get(cfg.user_id);
       if (!userProfile) continue;
-
-      // Check remaining AI credits
-      if ((userProfile.ai_credits ?? 0) <= 0) {
-        continue;
-      }
 
       // Check Schedule
       const userTz = userProfile.timezone || "Africa/Cairo";
@@ -374,72 +368,16 @@ export async function evaluateProjectForAutoBidding(project: {
           templateVariant === "B" ? cfg.template_b_id : cfg.template_a_id;
       }
 
-      // Fetch template body if selected
-      let templateBody = "";
-      if (selectedTemplateId) {
-        const { data: tpl } = await (supabaseAdmin
-          .from("proposal_templates") as any)
-          .select("template_body")
-          .eq("id", selectedTemplateId)
-          .maybeSingle();
-
-        if (tpl) templateBody = tpl.template_body || "";
-      }
-
       // 4. Select Smart Attachment
       const selectedAttachment = selectSmartAttachment(
         cfg.smart_attachments || [],
         `${project.title} ${project.description}`
       );
 
-      // 5. Fetch Portfolio items
-      const { data: portfolioRows } = await supabaseAdmin
-        .from("portfolio_items")
-        .select("*")
-        .eq("user_id", cfg.user_id);
-
-      const portfolioItems: PortfolioItem[] = (portfolioRows || []).map(
-        (item: any) => ({
-          id: item.id,
-          user_id: item.user_id,
-          project_title: item.project_title,
-          description: item.description,
-          live_url: item.live_url,
-          tags: item.tags || [],
-          category: item.category,
-        })
-      );
-
-      // 6. Generate Context-Aware Proposal
-      let generatedProposal = "";
-      try {
-        const aiProposal = await generateContextAwareProposal({
-          title: project.title,
-          description: project.description,
-          category: project.category || "web_dev",
-          platform: project.platform,
-          freelancerBio: userProfile.bio || userProfile.title || "",
-          freelancerSkills: userSkills.join(", "),
-          toneOfVoice: userProfile.tone_of_voice || "confident",
-          customInstructions: templateBody
-            ? `استند إلى هذا القالب في صياغة العرض: ${templateBody}`
-            : undefined,
-          portfolioItems,
-        });
-        generatedProposal = aiProposal.proposal;
-      } catch (e: any) {
-        generatedProposal = `مرحباً بك، قرأت متطلبات مشروعك "${project.title}" بعناية ولدي الخبرة الكاملة لإنجازه بأعلى جودة. يمكنك معاينة سابقة أعمالي ومناقشة تفاصيل التسليم فوراً.`;
-      }
-
-      // Append Smart Attachment Link if available
-      if (selectedAttachment && selectedAttachment.url_or_file) {
-        generatedProposal += `\n\n📌 مرفق ذو صلة بالمشروع: ${selectedAttachment.title} - ${selectedAttachment.url_or_file}`;
-      }
-
-      const initialStatus =
-        cfg.review_mode === "full_auto" ? "auto_sent" : "pending_review";
-
-      // 7. Insert into auto_bid_queue
+      // 5. Queue the project WITHOUT writing the proposal. The AI runs only when the user
+      //    presses "generate" in the queue (one credit then), so no tokens are spent on
+      //    projects nobody applies to. Every item waits for the user: nothing is ever sent
+      //    automatically (Arab platforms have no official way to submit for the user).
       const { data: queueItem, error: qErr } = await (supabaseAdmin
         .from("auto_bid_queue") as any)
         .insert({
@@ -447,13 +385,12 @@ export async function evaluateProjectForAutoBidding(project: {
           project_id: project.id || null,
           lead_id: project.lead_id || null,
           match_score: scoreResult.score,
-          status: initialStatus,
-          generated_proposal: generatedProposal,
+          status: "pending_review",
+          generated_proposal: "",
           template_used_id: selectedTemplateId || null,
           template_variant: templateVariant,
           selected_attachment: selectedAttachment,
           platform_url: project.url,
-          processed_at: initialStatus === "auto_sent" ? new Date().toISOString() : null,
         })
         .select()
         .single();
@@ -461,16 +398,6 @@ export async function evaluateProjectForAutoBidding(project: {
       if (!qErr && queueItem) {
         queuedCount++;
 
-        // Deduct credit
-        await (supabaseAdmin
-          .from("freelancer_profiles") as any)
-          .update({
-            ai_credits: Math.max(0, (userProfile.ai_credits ?? 25) - 1),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("user_id", cfg.user_id);
-
-        // Send Telegram Notification
         if (userProfile.telegram_chat_id) {
           await sendTelegramAutoBidNotification(userProfile.telegram_chat_id, {
             id: queueItem.id,
@@ -478,7 +405,7 @@ export async function evaluateProjectForAutoBidding(project: {
             platform: project.platform,
             platform_url: project.url,
             match_score: scoreResult.score,
-            generated_proposal: generatedProposal,
+            reasons: scoreResult.reasons,
             attachment_title: selectedAttachment?.title,
           });
         }
