@@ -328,7 +328,8 @@ export async function GET(req: NextRequest) {
       actionsCreated,
       smartTelegramDispatched,
       legacyDispatched,
-      ingestionStats,
+      // Counts only: the scraped projects themselves made the response too large for cron services
+      ingestionStats: ingestionStats.map(({ projects, ...stats }) => stats),
     });
   } catch (err: any) {
     console.error('[Cron Ingest] Pipeline failure:', err);
