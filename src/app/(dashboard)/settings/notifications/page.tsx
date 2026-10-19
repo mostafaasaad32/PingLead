@@ -12,6 +12,8 @@ import {
   Info,
   Unlink,
   Loader2,
+  Copy,
+  Check,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -36,6 +38,44 @@ export default function NotificationsSettingsPage() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [startCopied, setStartCopied] = useState(false);
+
+  // Telegram Web drops the ?start= payload, so offer the same command to paste manually
+  const startToken = connectLink.split("?start=")[1] || "";
+  const startCommand = startToken ? `/start ${startToken}` : "";
+
+  const copyStartCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(startCommand);
+      setStartCopied(true);
+      setTimeout(() => setStartCopied(false), 2000);
+    } catch {
+      setErrorMessage("تعذر النسخ تلقائياً. حدّد الرسالة وانسخها يدوياً.");
+    }
+  };
+
+  // Waits for the bot to confirm the link (used by both the button and the manual command)
+  const startWaitingForLink = () => {
+    setErrorMessage(null);
+    setWaitingForStart(true);
+    const startedAt = Date.now();
+
+    if (pollTimer.current) clearInterval(pollTimer.current);
+    pollTimer.current = setInterval(async () => {
+      try {
+        const data = await fetchConnection();
+        if (data.connected) {
+          stopPolling();
+          showToast("تم ربط تليجرام بحسابك بنجاح!");
+        } else if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+          stopPolling();
+          setErrorMessage("لم يصل تأكيد من البوت. افتح البوت واضغط Start، ثم اضغط «ربط تليجرام» مرة أخرى.");
+        }
+      } catch {
+        // keep polling; transient network errors are fine
+      }
+    }, POLL_INTERVAL_MS);
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -98,26 +138,7 @@ export default function NotificationsSettingsPage() {
   const handleConnect = () => {
     if (!connectLink) return;
     window.open(connectLink, "_blank", "noopener,noreferrer");
-
-    setErrorMessage(null);
-    setWaitingForStart(true);
-    const startedAt = Date.now();
-
-    if (pollTimer.current) clearInterval(pollTimer.current);
-    pollTimer.current = setInterval(async () => {
-      try {
-        const data = await fetchConnection();
-        if (data.connected) {
-          stopPolling();
-          showToast("تم ربط تليجرام بحسابك بنجاح!");
-        } else if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
-          stopPolling();
-          setErrorMessage("لم يصل تأكيد من البوت. افتح البوت واضغط Start، ثم اضغط «ربط تليجرام» مرة أخرى.");
-        }
-      } catch {
-        // keep polling; transient network errors are fine
-      }
-    }, POLL_INTERVAL_MS);
+    startWaitingForLink();
   };
 
   const handleDisconnect = async () => {
@@ -309,6 +330,46 @@ export default function NotificationsSettingsPage() {
             <li>اضغط زر <strong>ربط تليجرام</strong> بالأعلى، وسيفتح البوت في تليجرام.</li>
             <li>اضغط <strong>Start</strong> في البوت. ستتحول هذه الصفحة إلى «متصل» خلال ثوانٍ.</li>
           </ol>
+
+          {startCommand && (
+            <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
+              <p className="text-xs text-slate-700 font-bold">
+                لم يتم الربط؟ (يحدث غالباً مع تليجرام ويب)
+              </p>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                افتح البوت{" "}
+                <a
+                  href={`https://t.me/${botUsername}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-bold text-emerald-700 hover:underline"
+                  dir="ltr"
+                >
+                  @{botUsername}
+                </a>{" "}
+                وأرسل له هذه الرسالة كما هي:
+              </p>
+              <div className="flex items-stretch rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
+                <code
+                  dir="ltr"
+                  className="flex-1 min-w-0 px-3 py-2 text-[11px] font-mono text-slate-800 overflow-x-auto whitespace-nowrap select-all"
+                >
+                  {startCommand}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    copyStartCommand();
+                    if (!waitingForStart) startWaitingForLink();
+                  }}
+                  className="px-3 text-[11px] font-bold text-emerald-700 bg-white border-r border-slate-200 hover:bg-emerald-50 transition flex items-center gap-1.5 shrink-0"
+                >
+                  {startCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{startCopied ? "تم النسخ" : "نسخ"}</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
