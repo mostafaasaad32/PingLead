@@ -8,6 +8,30 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Competition & client-quality conditions (migration 0012). Only fields present in
+ * the request are returned, so older clients that don't send them keep working.
+ */
+function smartFilterFields(body: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  const intOrNull = (v: any, max?: number) => {
+    if (v === null || v === "" || v === undefined) return null;
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return max ? Math.min(n, max) : n;
+  };
+  if ("max_bids" in body) out.max_bids = intOrNull(body.max_bids);
+  if ("min_client_hire_rate" in body) out.min_client_hire_rate = intOrNull(body.min_client_hire_rate, 100);
+  if ("exclude_new_clients" in body) out.exclude_new_clients = Boolean(body.exclude_new_clients);
+  if ("job_type" in body) out.job_type = ["fixed", "hourly"].includes(body.job_type) ? body.job_type : "any";
+  if ("client_countries" in body) {
+    out.client_countries = Array.isArray(body.client_countries)
+      ? body.client_countries.filter((c: any) => typeof c === "string" && c.trim()).slice(0, 30)
+      : [];
+  }
+  return out;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
@@ -78,6 +102,7 @@ export async function POST(req: NextRequest) {
       min_budget_usd: Number(min_budget_usd) || 0,
       is_active: is_active ?? true,
       notify_telegram: notify_telegram ?? true,
+      ...smartFilterFields(body),
     };
 
     const { data: inserted, error } = await (supabase
@@ -128,6 +153,7 @@ export async function PUT(req: NextRequest) {
     if (updates.min_budget_usd !== undefined) payload.min_budget_usd = Number(updates.min_budget_usd);
     if (updates.is_active !== undefined) payload.is_active = Boolean(updates.is_active);
     if (updates.notify_telegram !== undefined) payload.notify_telegram = Boolean(updates.notify_telegram);
+    Object.assign(payload, smartFilterFields(updates));
 
     const { data: updated, error } = await (supabase
       .from("user_filters") as any)

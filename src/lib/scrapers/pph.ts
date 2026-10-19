@@ -126,6 +126,7 @@ export async function scrapePphCategory(
             : new Date().toISOString(),
           author: job.client?.shortName || 'PPH Client',
           insights: {
+            job_type: isHourly ? 'hourly' : 'fixed',
             bids_count: typeof job.proposalCount === 'number' ? job.proposalCount : null,
             client_country: job.client?.country || null,
             client_registered_at: job.client?.reg_dt || null,

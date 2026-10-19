@@ -350,6 +350,8 @@ export interface ProjectInsights {
   client_country?: string | null;
   duration_text?: string | null;
   details_fetched_at?: string | null;
+  /** Fixed-price or hourly. Used for matching only (not stored). */
+  job_type?: 'fixed' | 'hourly' | null;
 }
 
 export const PROJECT_INSIGHT_KEYS: (keyof ProjectInsights)[] = [
@@ -415,6 +417,12 @@ export interface UserFilter {
   min_budget_usd: number;
   is_active: boolean;
   notify_telegram: boolean;
+  // Competition & client-quality conditions (migration 0012); unknown project values pass
+  max_bids?: number | null;
+  min_client_hire_rate?: number | null;
+  exclude_new_clients?: boolean;
+  job_type?: 'any' | 'fixed' | 'hourly';
+  client_countries?: string[];
   created_at?: string;
   updated_at?: string;
 }

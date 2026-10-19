@@ -93,6 +93,7 @@ export async function scrapeFreelancerCategory(
           published_at: p.submitdate ? new Date(p.submitdate * 1000).toISOString() : new Date().toISOString(),
           author: 'Freelancer Client',
           insights: {
+            job_type: p.type === 'hourly' ? 'hourly' : p.type === 'fixed' ? 'fixed' : null,
             bids_count: typeof p.bid_stats?.bid_count === 'number' ? p.bid_stats.bid_count : null,
             // bid_avg is in the project's currency; store it in USD like budget_usd_estimate
             bids_avg: typeof p.bid_stats?.bid_avg === 'number'

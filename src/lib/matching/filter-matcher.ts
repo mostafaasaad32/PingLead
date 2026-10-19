@@ -6,6 +6,10 @@
 
 import { UnifiedProject, UserFilter, ProjectCategory, FreelancePlatform, isJobBoard } from '../scrapers/types';
 import { isCategoryMatch } from '../filters/categorizer';
+import { countryCodeFor } from '../filters/countries';
+
+// Arab marketplaces only post fixed-price projects
+const FIXED_PRICE_PLATFORMS: string[] = ['mostaql', 'nafezly', 'khamsat', 'kafiil'];
 
 export interface FilterMatchResult {
   matched: boolean;
@@ -120,6 +124,41 @@ export function evaluateProjectAgainstFilter(
       baseResult.reasons.push(
         `Budget ($${highestRecordedBudget} USD) is below filter minimum ($${filter.min_budget_usd} USD)`
       );
+      return baseResult;
+    }
+  }
+
+  // 4b. Competition & client quality (migration 0012). A value the platform doesn't
+  //     expose never rejects a project; only known values are compared.
+  if (filter.max_bids && filter.max_bids > 0 && typeof project.bids_count === 'number' && project.bids_count > filter.max_bids) {
+    baseResult.reasons.push(`Too many bids (${project.bids_count} > ${filter.max_bids})`);
+    return baseResult;
+  }
+  if (
+    filter.min_client_hire_rate &&
+    filter.min_client_hire_rate > 0 &&
+    typeof project.client_hire_rate === 'number' &&
+    project.client_hire_rate < filter.min_client_hire_rate
+  ) {
+    baseResult.reasons.push(`Client hire rate ${project.client_hire_rate}% < ${filter.min_client_hire_rate}%`);
+    return baseResult;
+  }
+  // Mostaql pages were read and show no hire rate = this client has never hired anyone
+  if (filter.exclude_new_clients && project.details_fetched_at && project.client_hire_rate == null) {
+    baseResult.reasons.push('Client has never hired');
+    return baseResult;
+  }
+  if (filter.job_type && filter.job_type !== 'any') {
+    const jobType = project.job_type ?? (FIXED_PRICE_PLATFORMS.includes(project.platform) ? 'fixed' : null);
+    if (jobType && jobType !== filter.job_type) {
+      baseResult.reasons.push(`Job type ${jobType} is not ${filter.job_type}`);
+      return baseResult;
+    }
+  }
+  if (filter.client_countries && filter.client_countries.length > 0) {
+    const code = countryCodeFor(project.client_country);
+    if (code && !filter.client_countries.includes(code)) {
+      baseResult.reasons.push(`Client country ${project.client_country} not in filter`);
       return baseResult;
     }
   }

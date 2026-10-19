@@ -122,6 +122,11 @@ export async function GET(req: NextRequest) {
       min_budget_usd: Number(f.min_budget_usd) || 0,
       is_active: f.is_active,
       notify_telegram: f.notify_telegram ?? true,
+      max_bids: f.max_bids ?? null,
+      min_client_hire_rate: f.min_client_hire_rate ?? null,
+      exclude_new_clients: f.exclude_new_clients ?? false,
+      job_type: f.job_type ?? 'any',
+      client_countries: f.client_countries || [],
       created_at: f.created_at,
       updated_at: f.updated_at,
     }));

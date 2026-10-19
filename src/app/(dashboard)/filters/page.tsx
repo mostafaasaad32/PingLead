@@ -50,6 +50,7 @@ import {
   isJobBoard,
 } from "@/lib/scrapers/types";
 import { isCategoryMatch } from "@/lib/filters/categorizer";
+import { COUNTRY_OPTIONS, GULF_COUNTRY_CODES, countryCodeFor } from "@/lib/filters/countries";
 
 // Quick lookup map for platform metadata
 const PLATFORM_MAP = new Map<string, PlatformMetadata>(
@@ -74,8 +75,16 @@ interface FilterItem {
   min_budget_usd: number;
   is_active: boolean;
   notify_telegram: boolean;
+  max_bids?: number | null;
+  min_client_hire_rate?: number | null;
+  exclude_new_clients?: boolean;
+  job_type?: "any" | "fixed" | "hourly";
+  client_countries?: string[];
   created_at?: string;
 }
+
+// Arab marketplaces only post fixed-price projects (mirrors the server-side matcher)
+const FIXED_PRICE_PLATFORMS = ["mostaql", "nafezly", "khamsat", "kafiil"];
 
 interface ProjectItem {
   id: string;
@@ -92,6 +101,10 @@ interface ProjectItem {
   author: string;
   published_at: string;
   quality_score: number; // 1 to 5
+  bids_count?: number | null;
+  client_hire_rate?: number | null;
+  client_country?: string | null;
+  details_fetched_at?: string | null;
 }
 
 interface ProposalTemplate {
@@ -133,10 +146,18 @@ export default function JobFiltersWorkspace() {
   const [timeRange, setTimeRange] = useState<string>("all");
   const [notifyTelegram, setNotifyTelegram] = useState<boolean>(true);
 
+  // Competition & client quality
+  const [maxBids, setMaxBids] = useState<number>(0); // 0 = any
+  const [minHireRate, setMinHireRate] = useState<number>(0); // 0 = any
+  const [excludeNewClients, setExcludeNewClients] = useState<boolean>(false);
+  const [jobType, setJobType] = useState<"any" | "fixed" | "hourly">("any");
+  const [clientCountries, setClientCountries] = useState<string[]>([]);
+
   // Accordion Expand/Collapse States
   const [openSections, setOpenSections] = useState({
     keywords: true,
     budget: true,
+    quality: false,
     sites: true,
     advanced: false,
   });
@@ -252,6 +273,11 @@ export default function JobFiltersWorkspace() {
       f.categories && f.categories.length > 0 ? f.categories : ALL_CATEGORIES
     );
     setNotifyTelegram(f.notify_telegram ?? true);
+    setMaxBids(f.max_bids || 0);
+    setMinHireRate(f.min_client_hire_rate || 0);
+    setExcludeNewClients(!!f.exclude_new_clients);
+    setJobType(f.job_type || "any");
+    setClientCountries(f.client_countries || []);
   };
 
   // Reset to fresh untitled filter
@@ -268,6 +294,11 @@ export default function JobFiltersWorkspace() {
     setLanguage("all");
     setTimeRange("all");
     setNotifyTelegram(true);
+    setMaxBids(0);
+    setMinHireRate(0);
+    setExcludeNewClients(false);
+    setJobType("any");
+    setClientCountries([]);
   };
 
   // Toggle Section in Accordion
@@ -369,6 +400,18 @@ export default function JobFiltersWorkspace() {
         if (timeRange === "7d" && diffHours > 168) return false;
       }
 
+      // 5b. Competition & client quality (unknown values pass, like the server matcher)
+      if (maxBids > 0 && typeof project.bids_count === "number" && project.bids_count > maxBids) return false;
+      if (minHireRate > 0 && typeof project.client_hire_rate === "number" && project.client_hire_rate < minHireRate) {
+        return false;
+      }
+      if (excludeNewClients && project.details_fetched_at && project.client_hire_rate == null) return false;
+      if (jobType === "hourly" && FIXED_PRICE_PLATFORMS.includes(project.platform)) return false;
+      if (clientCountries.length > 0) {
+        const code = countryCodeFor(project.client_country);
+        if (code && !clientCountries.includes(code)) return false;
+      }
+
       const fullText = `${project.title} ${project.description}`.toLowerCase();
 
       // 6. Include Keywords check
@@ -399,6 +442,11 @@ export default function JobFiltersWorkspace() {
     timeRange,
     includeTags,
     excludeTags,
+    maxBids,
+    minHireRate,
+    excludeNewClients,
+    jobType,
+    clientCountries,
   ]);
 
   // Save or Update Filter to Supabase
@@ -419,6 +467,11 @@ export default function JobFiltersWorkspace() {
         min_budget_usd: minBudget,
         is_active: true,
         notify_telegram: notifyTelegram,
+        max_bids: maxBids || null,
+        min_client_hire_rate: minHireRate || null,
+        exclude_new_clients: excludeNewClients,
+        job_type: jobType,
+        client_countries: clientCountries,
       };
 
       if (isNewFilter || selectedFilterId === "new") {
@@ -959,6 +1012,158 @@ export default function JobFiltersWorkspace() {
                   />
                   <span>إظهار المشاريع غير محددة الميزانية</span>
                 </label>
+              </div>
+            )}
+          </div>
+
+          {/* Accordion 2b: Competition & client quality */}
+          <div className="bg-white">
+            <button
+              type="button"
+              onClick={() => toggleSection("quality")}
+              className="w-full px-4 py-3 flex items-center justify-between text-start hover:bg-slate-50/80 transition"
+            >
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                <span className="text-emerald-600">🏁</span>
+                <span>المنافسة وجودة العميل</span>
+                {(maxBids > 0 || minHireRate > 0 || excludeNewClients || jobType !== "any" || clientCountries.length > 0) && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" aria-label="مفعّل" />
+                )}
+              </div>
+              {openSections.quality ? (
+                <ChevronUp className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
+
+            {openSections.quality && (
+              <div className="p-4 pt-1 space-y-4 border-t border-slate-100">
+                <p className="text-[10px] text-slate-400 leading-relaxed pt-2">
+                  المنصات اللي مش بتعرض المعلومة دي مشاريعها بتعدّي عادي. مثلاً خمسات مش بيعرض عدد العروض.
+                </p>
+
+                {/* Max bids */}
+                <div>
+                  <div className="flex items-baseline justify-between mb-1">
+                    <label htmlFor="max-bids" className="text-[11px] font-bold text-slate-600">أقصى عدد عروض على المشروع</label>
+                    <span className="text-xs font-bold text-emerald-600">{maxBids === 0 ? "أي عدد" : `${maxBids} أو أقل`}</span>
+                  </div>
+                  <input
+                    id="max-bids"
+                    type="range"
+                    min={0}
+                    max={50}
+                    step={1}
+                    value={maxBids}
+                    onChange={(e) => setMaxBids(parseInt(e.target.value, 10))}
+                    className="w-full accent-emerald-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+                    <span>أي عدد</span>
+                    <span>10</span>
+                    <span>25</span>
+                    <span>50</span>
+                  </div>
+                </div>
+
+                {/* Min client hire rate */}
+                <div>
+                  <div className="flex items-baseline justify-between mb-1">
+                    <label htmlFor="min-hire" className="text-[11px] font-bold text-slate-600">أقل معدل توظيف للعميل</label>
+                    <span className="text-xs font-bold text-emerald-600">{minHireRate === 0 ? "أي معدل" : `${minHireRate}%+`}</span>
+                  </div>
+                  <input
+                    id="min-hire"
+                    type="range"
+                    min={0}
+                    max={90}
+                    step={10}
+                    value={minHireRate}
+                    onChange={(e) => setMinHireRate(parseInt(e.target.value, 10))}
+                    className="w-full accent-emerald-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">متاح من مستقل.</p>
+                </div>
+
+                <label className="flex items-center gap-2 text-xs text-slate-700 font-medium cursor-pointer">
+                  <input
+                    id="exclude-new-clients"
+                    type="checkbox"
+                    checked={excludeNewClients}
+                    onChange={(e) => setExcludeNewClients(e.target.checked)}
+                    className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300"
+                  />
+                  <span>استبعد العملاء اللي عمرهم ما وظّفوا حد</span>
+                </label>
+
+                {/* Job type */}
+                <div>
+                  <span className="text-[11px] font-bold text-slate-600 block mb-1.5">نوع الشغل</span>
+                  <div className="inline-flex p-0.5 bg-slate-100 rounded-lg border border-slate-200" role="radiogroup">
+                    {([
+                      ["any", "الكل"],
+                      ["fixed", "سعر ثابت"],
+                      ["hourly", "بالساعة"],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="radio"
+                        aria-checked={jobType === value}
+                        onClick={() => setJobType(value)}
+                        className={`px-3 py-1 rounded-md text-[11px] font-bold transition ${
+                          jobType === value ? "bg-white text-slate-900 shadow-xs" : "text-slate-500"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Client countries */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-bold text-slate-600">دولة العميل</span>
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700">
+                      <button type="button" onClick={() => setClientCountries(GULF_COUNTRY_CODES)} className="hover:underline">
+                        الخليج
+                      </button>
+                      <span>•</span>
+                      <button type="button" onClick={() => setClientCountries([])} className="hover:underline">
+                        أي دولة
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {COUNTRY_OPTIONS.map((c) => {
+                      const active = clientCountries.includes(c.code);
+                      return (
+                        <button
+                          key={c.code}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() =>
+                            setClientCountries((prev) =>
+                              prev.includes(c.code) ? prev.filter((x) => x !== c.code) : [...prev, c.code]
+                            )
+                          }
+                          className={`px-2 py-0.5 rounded-md border text-[10px] font-semibold transition ${
+                            active
+                              ? "bg-emerald-600 border-emerald-600 text-white"
+                              : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                          }`}
+                        >
+                          {c.label_ar}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1.5">
+                    {clientCountries.length === 0 ? "كل الدول." : `${clientCountries.length} دولة مختارة.`} متاح من نفذلي وPeoplePerHour.
+                  </p>
+                </div>
               </div>
             )}
           </div>
