@@ -50,7 +50,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/portfolio") ||
     pathname.startsWith("/insights") ||
     pathname.startsWith("/tracker") ||
-    pathname.startsWith("/settings");
+    pathname.startsWith("/settings") ||
+    pathname.startsWith("/onboarding");
 
   // Authentication paths
   const isAuthPath = pathname === "/login" || pathname === "/signup";
@@ -60,6 +61,14 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     redirectUrl.searchParams.set("returnUrl", pathname);
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  // 1b. Signed-in users who haven't finished (or skipped) first-run setup go there first
+  if (user && isProtectedPath && !pathname.startsWith("/onboarding") && !user.user_metadata?.onboarded) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/onboarding";
+    redirectUrl.search = "";
     return NextResponse.redirect(redirectUrl);
   }
 
