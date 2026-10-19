@@ -41,7 +41,8 @@ export async function scrapeBaeedCategory(
   categorySlug: string = 'web_mobile_dev',
   limit: number = 20
 ): Promise<UnifiedProject[]> {
-  const url = CATEGORY_MAP[categorySlug] || CATEGORY_MAP.web_dev;
+  // Unmapped slugs (including 'all') read every category, not just programming
+  const url = CATEGORY_MAP[categorySlug] || 'https://baaeed.com/remote-jobs';
 
   try {
     const res = await fetch(url, {

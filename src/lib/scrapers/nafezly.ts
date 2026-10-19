@@ -45,8 +45,12 @@ export async function scrapeNafezlyCategory(
   categorySlug: string = 'web_mobile_dev',
   limit: number = 25
 ): Promise<UnifiedProject[]> {
+  // 'all' = newest projects across every Nafezly category
   const nafezlyCat = CATEGORY_MAP[categorySlug] || 'development';
-  let targetUrl = `https://nafezly.com/projects?category=${nafezlyCat}&sort=latest`;
+  let targetUrl =
+    categorySlug === 'all'
+      ? 'https://nafezly.com/projects?sort=latest'
+      : `https://nafezly.com/projects?category=${nafezlyCat}&sort=latest`;
 
   try {
     let res = await fetch(targetUrl, {

@@ -44,8 +44,12 @@ export async function scrapeMostaqlCategory(
   categorySlug: string = 'web_mobile_dev',
   limit: number = 25
 ): Promise<UnifiedProject[]> {
+  // 'all' = the newest projects across every Mostaql category (covers ~4 hours per page)
   const mostaqlCategory = CATEGORY_MAP[categorySlug] || 'development';
-  let targetUrl = `https://mostaql.com/projects?category=${mostaqlCategory}&sort=latest`;
+  let targetUrl =
+    categorySlug === 'all'
+      ? 'https://mostaql.com/projects?sort=latest'
+      : `https://mostaql.com/projects?category=${mostaqlCategory}&sort=latest`;
 
   try {
     let res = await fetch(targetUrl, {
@@ -155,6 +159,8 @@ export interface MostaqlProjectDetails extends ProjectInsights {
   description?: string;
   budget_min?: number | null;
   budget_max?: number | null;
+  /** Mostaql's own category slug from the breadcrumb, e.g. "ai-machine-learning" */
+  platform_category?: string | null;
 }
 
 export async function fetchMostaqlProjectDetails(
@@ -190,7 +196,15 @@ export async function fetchMostaqlProjectDetails(
       .map((n) => parseFloat(n.replace(/,/g, '')))
       .filter((n) => n > 0);
 
+    // Breadcrumb: <a href="https://mostaql.com/projects/development">
+    const breadcrumbAt = html.indexOf('breadcrumb-item');
+    const categoryMatch =
+      breadcrumbAt >= 0
+        ? html.slice(breadcrumbAt, breadcrumbAt + 2000).match(/href="https:\/\/mostaql\.com\/projects\/([a-z-]+)"/i)
+        : null;
+
     return {
+      platform_category: categoryMatch ? categoryMatch[1] : null,
       budget_min: budgetNumbers.length ? Math.min(...budgetNumbers) : null,
       budget_max: budgetNumbers.length ? Math.max(...budgetNumbers) : null,
       description: descMatch ? stripHtml(descMatch[1]) : undefined,

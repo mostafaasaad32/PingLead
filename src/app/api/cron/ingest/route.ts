@@ -64,19 +64,14 @@ export async function GET(req: NextRequest) {
 
     // 3. Ingest projects concurrently across categories
     if (shouldScrape) {
+      // Each platform's newest-projects page across ALL categories, every cycle.
+      // Page 1 covers hours of postings on every platform, so nothing is missed and
+      // new projects alert within one cycle; projects are categorized locally.
+      // ?category=<slug> still scrapes a single category (manual debugging).
       const targetCategorySlug = req.nextUrl.searchParams.get('category');
-      // Rotate through all active categories, CATEGORIES_PER_CYCLE at a time,
-      // keyed on the current minute so serverless instances agree on the slice.
-      const CATEGORIES_PER_CYCLE = 2;
-      const sortedCategories = [...activeCategories].sort((a, b) => a.slug.localeCompare(b.slug));
-      const sliceCount = Math.max(1, Math.ceil(sortedCategories.length / CATEGORIES_PER_CYCLE));
-      const sliceIndex = Math.floor(Date.now() / 60_000) % sliceCount;
       const categoriesToScrape = targetCategorySlug
         ? activeCategories.filter((c) => c.slug === targetCategorySlug)
-        : sortedCategories.slice(
-            sliceIndex * CATEGORIES_PER_CYCLE,
-            sliceIndex * CATEGORIES_PER_CYCLE + CATEGORIES_PER_CYCLE
-          );
+        : [{ slug: 'all', name_ar: 'كل التخصصات' }];
 
       const categoryPromises = categoriesToScrape.map((cat) => ingestCategoryPosts(cat));
       const categoryResults = await Promise.allSettled(categoryPromises);

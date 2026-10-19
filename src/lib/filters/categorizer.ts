@@ -8,140 +8,149 @@ import { CategoryType, ProjectCategory, estimateBudgetUsd } from '../scrapers/ty
 
 // ==============================================================================
 // 14 Comprehensive Category Regex Dictionaries (Arabic + English)
+// Latin terms are whole-word (\b...\b): unbounded "ai" matched "email", "ar" matched
+// "are", "unity" matched "community", which pushed most English posts into AI/games.
+// Ambiguous short Arabic terms use arWord(), since \b doesn't work on Arabic letters.
 // ==============================================================================
+
+/** Matches an Arabic word only when it isn't part of a longer Arabic word. */
+const arWord = (word: string) => new RegExp(`(?:^|[^\\u0600-\\u06FF])${word}(?:$|[^\\u0600-\\u06FF])`);
+
 const CATEGORY_PATTERNS: Record<CategoryType, RegExp[]> = {
   // 1. Web & Mobile Development
   web_mobile_dev: [
     /برمج|مبرمج|تطوير مواقع|تطوير ويب|مطور برمجيات|برمجة موقع/i,
-    /تطبيق|تطبيقات|أندرويد|اندرويد|ايفون|آيفون|ios|android/i,
-    /react|react native|flutter|vue|angular|next\.?js|nuxt|svelte/i,
-    /node\.?js|express|nest\.?js|django|fastapi|flask|laravel|php|asp\.net|\.net core/i,
-    /python|javascript|typescript|golang|rust|ruby|rails/i,
-    /api|rest api|graphql|web service|webhook|backend|frontend|fullstack|full-stack/i,
-    /sql|postgresql|mysql|mongodb|redis|supabase|firebase|prisma/i,
-    /software engineer|web developer|mobile developer|app developer|full stack/i,
+    /تطبيق جوال|تطبيقات|تطبيق اندرويد|تطبيق أندرويد|أندرويد|اندرويد|ايفون|آيفون/i,
+    /\b(?:ios|android|react|react native|flutter|vue|angular|next\.?js|nuxt|svelte)\b/i,
+    /\b(?:node\.?js|express\.?js|nest\.?js|django|fastapi|flask|laravel|php|asp\.net|\.net core)\b/i,
+    /\b(?:python|javascript|typescript|golang|ruby on rails|rails)\b/i,
+    /\b(?:apis?|rest api|graphql|web service|webhooks?|backend|back-end|frontend|front-end|fullstack|full-stack)\b/i,
+    /\b(?:sql|postgresql|mysql|mongodb|redis|supabase|firebase|prisma)\b/i,
+    /\b(?:software engineer|software developer|web developer|mobile developer|app developer|full stack|website)\b/i,
   ],
 
   // 2. AI, Data & Automation
   ai_data_automation: [
-    /ذكاء اصطناعي|تعلم آلي|تعلم العميق|ai|machine learning|deep learning/i,
-    /chatgpt|gpt-?4|openai|claude|gemini|llm|nlp|rag|langchain|llamaindex/i,
-    /بوت|أتمتة|اتمتة|أتمته|automation|bot|n8n|zapier|make\.com/i,
-    /علم بيانات|تحليل بيانات|data science|data analyst|data analysis|pandas|numpy/i,
-    /سحب بيانات|كشط بيانات|scraping|web scraper|crawler|selenium|playwright|puppeteer/i,
-    /computer vision|yolo|ocr|speech to text|stt|tts|diffusion|stable diffusion/i,
+    /ذكاء اصطناعي|تعلم آلي|تعلم الآلة|تعلم العميق/i,
+    /\b(?:ai|a\.i\.|artificial intelligence|machine learning|deep learning)\b/i,
+    /\b(?:chatgpt|gpt-?[345]o?|openai|llms?|nlp|rag|langchain|llamaindex|ai agents?)\b/i,
+    /أتمتة|اتمتة|أتمته|بوت تليجرام|بوت واتساب|شات بوت|روبوت محادثة/i,
+    /\b(?:automation|chatbots?|telegram bot|discord bot|whatsapp bot|n8n|zapier|make\.com)\b/i,
+    /علم بيانات|تحليل بيانات|محلل بيانات/i,
+    /\b(?:data science|data scientist|data analyst|data analysis|pandas|numpy|power bi|tableau)\b/i,
+    /سحب بيانات|كشط بيانات/i,
+    /\b(?:scraping|web scraper|crawler|selenium|playwright|puppeteer)\b/i,
+    /\b(?:computer vision|yolo|ocr|speech to text|text to speech|stable diffusion)\b/i,
   ],
 
   // 3. UI/UX & Graphic Design
   ui_ux_graphic: [
-    /تصميم|مصمم|غرافيك|جرافيك|جرافكس|graphic design/i,
-    /واجهة|واجهات|تجربة مستخدم|ui|ux|ui\/ux|user interface|user experience/i,
-    /figma|adobe xd|sketch|invision|wireframe|prototype/i,
-    /شعار|شعارات|لوجو|لوقو|هوية بصرية|هوية تجارية|branding|brand identity/i,
-    /فوتوشوب|photoshop|إليستريتور|اليستريتور|illustrator|indesign/i,
-    /بنر|بوستر|فلاير|بروشور|سوشيال ميديا ديزاين|منيو|كروت شخصية|packaging/i,
-    /رسم رقمي|digital art|vector|illustration|رسام/i,
+    /تصميم|مصمم|غرافيك|جرافيك|جرافكس/i,
+    /\bgraphic design(?:er)?\b/i,
+    /واجهة|واجهات|تجربة مستخدم/i,
+    /\b(?:ui|ux|ui\/ux|user interface|user experience)\b/i,
+    /\b(?:figma|adobe xd|invision|wireframes?)\b/i,
+    /شعار|شعارات|لوجو|لوقو|هوية بصرية|هوية تجارية/i,
+    /\b(?:logo|logos|branding|brand identity)\b/i,
+    /فوتوشوب|إليستريتور|اليستريتور/i,
+    /\b(?:photoshop|illustrator|indesign|canva)\b/i,
+    /بنر|بوستر|فلاير|بروشور|منيو|كروت شخصية/i,
+    /\b(?:banner|poster|flyer|brochure|packaging)\b/i,
+    /رسم رقمي|رسام/i,
+    /\b(?:digital art|vector|illustration)\b/i,
   ],
 
   // 4. Video, Motion & Audio
   video_audio_motion: [
-    /مونتاج|مونتير|تحرير فيديو|تعديل فيديو|video editing|video editor/i,
-    /موشن جرافيك|موشن غرافيك|motion graphic|motion design|animation|انيميشن/i,
-    /ريلز|شورتس|تيك توك|reels|shorts|tiktok video/i,
-    /بريمير|premiere|افتر افكت|after effects|davinci|final cut/i,
-    /صوت|صوتيات|تعليق صوتي|فويس أوفر|voiceover|voice over|audio/i,
-    /هندسة صوتية|بودكاست|podcast|sound design|مكساج|تعديل صوت/i,
+    /مونتاج|مونتير|تحرير فيديو|تعديل فيديو|موشن جرافيك|موشن غرافيك|انيميشن|ريلز|شورتس/i,
+    /\b(?:video editing|video editor|motion graphics?|motion design|animation|animated|reels|youtube shorts)\b/i,
+    /بريمير|افتر افكت|تعليق صوتي|فويس أوفر|صوتيات|هندسة صوتية|بودكاست|مكساج|تعديل صوت/i,
+    /\b(?:premiere|after effects|davinci|final cut|voiceover|voice over|audio|podcast|sound design)\b/i,
   ],
 
   // 5. Digital Marketing & SEO
   digital_marketing_seo: [
-    /تسويق|مسوق|تسويق الكتروني|digital marketing|marketing specialist/i,
-    /حملة إعلانية|حملة اعلانية|إعلانات ممولة|اعلانات ممولة|ads campaign/i,
-    /سيو|seo|تحسين محركات البحث|search engine optimization|backlinks/i,
-    /google ads|meta ads|facebook ads|tiktok ads|snapchat ads|x ads/i,
-    /إدارة صفحات|مدير صفحات|social media management|media buyer/i,
-    /بريد الكتروني|email marketing|mailchimp|klaviyo|funnel|قمع تسويقي/i,
-    /growth hacker|conversion rate|cro|semrush|ahrefs/i,
+    /تسويق|مسوق|حملة إعلانية|حملة اعلانية|إعلانات ممولة|اعلانات ممولة|سيو|تحسين محركات البحث/i,
+    /\b(?:digital marketing|marketing|marketer|ads campaign|seo|search engine optimization|backlinks)\b/i,
+    /\b(?:google ads|meta ads|facebook ads|tiktok ads|snapchat ads|ppc)\b/i,
+    /إدارة صفحات|مدير صفحات|قمع تسويقي|ادسنس|أدسنس|لايكات|متابعين|تفاعلات|سوشيال ميديا/i,
+    /\b(?:adsense|followers|likes|engagement|social media)\b/i,
+    /\b(?:social media management|social media manager|media buyer|email marketing|mailchimp|klaviyo|sales funnel)\b/i,
+    /\b(?:growth hacker|conversion rate|cro|semrush|ahrefs)\b/i,
   ],
 
   // 6. Writing & Translation
   writing_translation: [
-    /كتابة|كاتب|كتابة مقالات|صناعة محتوى|كاتب محتوى|content writer|copywriting/i,
-    /ترجمة|مترجم|ترجمة معتمدة|translation|translator|localize/i,
-    /تدقيق لغوي|تدقيق إملائي|proofreading|editing|مصحح لغوي/i,
-    /تفريغ صوتي|تفريغ نصوص|transcription|تلخيص/i,
-    /سيناريو|كتابة سكربت|scriptwriting|storytelling|أبحاث/i,
-    /ghostwriter|technical writer|creative writing|مقالات حصرية/i,
+    /كتابة|كاتب|كتابة مقالات|صناعة محتوى|كاتب محتوى|ترجمة|مترجم|تدقيق لغوي|تدقيق إملائي|مصحح لغوي/i,
+    /\b(?:content writer|content writing|copywriting|copywriter|article writing|blog posts?)\b/i,
+    /\b(?:translation|translator|translate|localization|proofreading|copy editing)\b/i,
+    /تفريغ صوتي|تفريغ نصوص|تلخيص|سيناريو|كتابة سكربت|مقالات حصرية/i,
+    /\b(?:transcription|scriptwriting|storytelling|ghostwriter|ghostwriting|technical writer|creative writing)\b/i,
   ],
 
   // 7. Business, Accounting & Legal
   business_accounting_legal: [
-    /محاسب|محاسبة|مالي|مالية|accounting|accountant|financial/i,
-    /ضرائب|ضريبة|زاتكا|zatca|قيمة مضافة|vat|ضريبة الدخل/i,
-    /قوائم مالية|ميزانية عمومية|ميزان مراجعة|دفاتر|قيود|دفتر الأستاذ/i,
-    /دراسة جدوى|خطة عمل|business plan|feasibility study/i,
-    /استشارات أعمال|تطوير أعمال|business consultant/i,
-    /قانون|قانوني|عقد|عقود|اتفاقية|محامي|legal|contract/i,
-    /quickbooks|xero|zoho books|sap|odoo accounting/i,
+    /محاسب|محاسبة/i,
+    arWord('مالي'),
+    arWord('مالية'),
+    /\b(?:accounting|accountant|bookkeeping|bookkeeper|financial statements?|financial model(?:ing)?)\b/i,
+    /ضرائب|ضريبة|زاتكا|قيمة مضافة|قوائم مالية|ميزانية عمومية|ميزان مراجعة|دفتر الأستاذ/i,
+    /\b(?:zatca|vat|tax return)\b/i,
+    /دراسة جدوى|خطة عمل|استشارات أعمال|تطوير أعمال/i,
+    /\b(?:business plan|feasibility study|business consultant)\b/i,
+    /قانون|قانوني|اتفاقية|محامي|صياغة عقد|صياغة عقود/i,
+    /\b(?:legal|lawyer|attorney|quickbooks|xero|zoho books|sap)\b/i,
   ],
 
   // 8. Sales, Customer Support & Virtual Assistance
   sales_customer_support: [
-    /خدمة عملاء|خدمة العملاء|customer service|customer support/i,
-    /دعم فني|help desk|ticket support|zendesk|intercom/i,
-    /مبيعات|مندوب مبيعات|sales|cold calling|telemarketing/i,
-    /مساعد افتراضي|مساعدة افتراضية|virtual assistant|va|admin support/i,
-    /إدخال بيانات|ادخال بيانات|data entry|copy paste|تنسيق ملفات/i,
-    /crm|hubspot|salesforce|lead qualification/i,
+    /خدمة عملاء|خدمة العملاء|دعم فني|مبيعات|مندوب مبيعات|مساعد افتراضي|مساعدة افتراضية|إدخال بيانات|ادخال بيانات|تنسيق ملف|تنسيق ملفات|ملف ورد|ملف وورد|اكسل|إكسل/i,
+    /\b(?:excel|word document|google sheets|spreadsheet)\b/i,
+    /\b(?:customer service|customer support|help desk|zendesk|intercom)\b/i,
+    /\b(?:sales|cold calling|telemarketing|lead generation|lead qualification|appointment setter)\b/i,
+    /\b(?:virtual assistant|va|admin support|data entry|copy paste|crm|hubspot|salesforce)\b/i,
   ],
 
   // 9. Engineering & Architecture
   engineering_architecture: [
-    /هندسة|مهندس|معماري|عمارة|architecture|architect/i,
-    /تصميم داخلي|ديكور|interior design|ديكورات/i,
-    /أوتوكاد|اوتوكاد|autocad|revit|ريفت|ريفيت/i,
-    /3d max|3ds max|v-ray|sketchup|lumion|رندر|render/i,
-    /إنشائي|مدني|كهربائي|ميكانيكي|civil engineer|structural/i,
-    /مخطط|مخططات|حساب كميات|رسومات تنفيذية/i,
+    /هندسة|مهندس|معماري|عمارة|تصميم داخلي|ديكور|ديكورات/i,
+    /\b(?:architectural|interior design|building design|landscape design)\b/i,
+    /أوتوكاد|اوتوكاد|ريفت|ريفيت|رندر|إنشائي|مخططات|حساب كميات|رسومات تنفيذية/i,
+    /\b(?:autocad|revit|3d max|3ds max|v-ray|sketchup|lumion|civil engineer(?:ing)?|structural engineer(?:ing)?|mep)\b/i,
   ],
 
   // 10. IT, DevOps & Cybersecurity
   it_cybersecurity_devops: [
-    /سيرفر|سيرفرات|خوادم|خادم|server|linux|ubuntu|centos/i,
-    /أمن سيبراني|أمن المعلومات|cybersecurity|infosec|security/i,
-    /اختراق أخلاقي|pen testing|penetration testing|vulnerability/i,
-    /devops|docker|kubernetes|k8s|ci\/cd|github actions/i,
-    /aws|azure|google cloud|gcp|cloudflare|terraform/i,
-    /شبكات|راوتر|سويتش|vpn|cisco|system administrator|sysadmin/i,
+    /سيرفر|سيرفرات|خوادم|خادم|أمن سيبراني|أمن المعلومات|اختراق أخلاقي|شبكات|راوتر|سويتش/i,
+    /\b(?:servers?|vps|linux|ubuntu|centos|cybersecurity|infosec|pen testing|penetration testing|vulnerability)\b/i,
+    /\b(?:devops|docker|kubernetes|k8s|ci\/cd|github actions|aws|azure|google cloud|gcp|cloudflare|terraform)\b/i,
+    /\b(?:vpn|cisco|system administrator|sysadmin)\b/i,
   ],
 
   // 11. E-commerce & Stores Management
   ecommerce_stores: [
-    /متجر الكتروني|متاجر|تجارة الكترونية|e-?commerce/i,
-    /سلة|منصة سلة|salla/i,
-    /زد|منصة زد|zid/i,
-    /شوبيفاي|shopify|woocommerce|ووكومرس/i,
-    /دروب شيبينج|dropshipping|aliexpress|cjdropshipping/i,
-    /رفع منتجات|إضافة منتجات|تعديل أسعار|إدارة المخزون|inventory/i,
-    /بوابة دفع|ربط الدفع|مدى|تمارا|تابي|stripe|paypal/i,
+    /متجر الكتروني|متجر إلكتروني|متاجر|تجارة الكترونية|تجارة إلكترونية|منصة سلة|منصة زد|شوبيفاي|ووكومرس|دروب شيبينج/i,
+    arWord('سلة'),
+    arWord('زد'),
+    /\b(?:e-?commerce|online store|salla|zid|shopify|woocommerce|dropshipping|aliexpress)\b/i,
+    /رفع منتجات|إضافة منتجات|إدارة المخزون|بوابة دفع|ربط الدفع|تمارا/i,
+    arWord('تابي'),
+    /\b(?:inventory|product listings?|payment gateway)\b/i,
   ],
 
   // 12. Education & Training
   education_training: [
-    /تدريس|معلم|مدرس|أستاذ|tutor|teacher|teaching/i,
-    /دورة تدريبية|كورس|تدريب|training|course/i,
-    /بحث علمي|رسالة ماجستير|أطروحة دكتوراه|academic research|thesis/i,
-    /شرح مادة|حل مسائل|رياضيات|فيزياء|كيمياء|لغة إنجليزية/i,
-    /إعداد حقائب تدريبية|حقيبة تدريبية|مناهج|curriculum/i,
+    /تدريس|معلم|مدرس|أستاذ|دورة تدريبية|تدريب|كورس|بحث علمي|رسالة ماجستير|أطروحة دكتوراه/i,
+    /\b(?:tutor|tutoring|teacher|teaching|online course|course creation|academic research|thesis|dissertation)\b/i,
+    /شرح مادة|حل مسائل|رياضيات|فيزياء|كيمياء|إعداد حقائب تدريبية|حقيبة تدريبية|مناهج/i,
+    /\b(?:curriculum|lesson plans?)\b/i,
   ],
 
   // 13. Game Dev & 3D/VR
   game_ar_vr: [
-    /ألعاب|تطوير ألعاب|برمجة ألعاب|game dev|game developer/i,
-    /unity|unreal engine|godot|c# game|roblox/i,
-    /نمذجة ثلاثية الأبعاد|3d modeling|blender|maya|zbrush/i,
-    /vr|ar|virtual reality|augmented reality|واقع معزز|واقع افتراضي/i,
-    /شخصيات 3d|ريجينج|rigging|3d assets/i,
+    /ألعاب|تطوير ألعاب|برمجة ألعاب|نمذجة ثلاثية الأبعاد|واقع معزز|واقع افتراضي|ريجينج/i,
+    /\b(?:game dev|game developer|game development|unity|unity3d|unreal engine|godot|roblox)\b/i,
+    /\b(?:3d model(?:ing|ling)?|blender|zbrush|rigging|3d assets|virtual reality|augmented reality|ar\/vr|vr)\b/i,
   ],
 
   // 14. Other
@@ -190,7 +199,8 @@ export function categorizeProject(
   // 2. Fast Category Hint Mapping if content didn't match a specific regex
   if (platformCategoryHint) {
     const hint = platformCategoryHint.toLowerCase();
-    if (hint.includes('ai') || hint.includes('data') || hint.includes('أتمتة')) return 'ai_data_automation';
+    // Word boundaries for short tokens: "Training" contains "ai", "Building" contains "ui"
+    if (/\bai\b|artificial|machine-learning|machine learning/.test(hint) || hint.includes('أتمتة') || hint.includes('ذكاء')) return 'ai_data_automation';
     if (hint.includes('video') || hint.includes('motion') || hint.includes('فيديو') || hint.includes('صوت')) return 'video_audio_motion';
     if (hint.includes('market') || hint.includes('seo') || hint.includes('تسويق')) return 'digital_marketing_seo';
     if (hint.includes('writ') || hint.includes('translat') || hint.includes('كتاب') || hint.includes('ترجم')) return 'writing_translation';
@@ -201,8 +211,12 @@ export function categorizeProject(
     if (hint.includes('sales') || hint.includes('support') || hint.includes('خدمة عملاء')) return 'sales_customer_support';
     if (hint.includes('game') || hint.includes('3d') || hint.includes('لعب')) return 'game_ar_vr';
     if (hint.includes('educat') || hint.includes('teach') || hint.includes('تعليم') || hint.includes('تدريب')) return 'education_training';
-    if (hint.includes('design') || hint.includes('ui') || hint.includes('تصميم')) return 'ui_ux_graphic';
-    if (hint.includes('mobile') || hint.includes('web') || hint.includes('dev') || hint.includes('برمج')) return 'web_mobile_dev';
+    if (hint.includes('design') || /\bui\b/.test(hint) || hint.includes('تصميم')) return 'ui_ux_graphic';
+    if (hint.includes('mobile') || hint.includes('web') || hint.includes('dev') || hint.includes('software') || hint.includes('programming') || hint.includes('برمج')) return 'web_mobile_dev';
+    if (hint.includes('business') || hint.includes('legal') || hint.includes('admin') || hint.includes('data entry') || hint.includes('أعمال')) return 'business_accounting_legal';
+    if (hint.includes('support') || hint.includes('دعم')) return 'sales_customer_support';
+    if (hint.includes('training') || hint.includes('تدريب')) return 'education_training';
+    if (hint.includes('engineer') || hint.includes('science')) return 'engineering_architecture';
   }
 
   // 3. Scan combined (content + hint)
@@ -215,7 +229,9 @@ export function categorizeProject(
     }
   }
 
-  return 'web_mobile_dev'; // Default primary domain
+  // Nothing in the text or the platform's category says what this is: don't guess "programming",
+  // or unrelated projects reach programmers' filters
+  return 'other';
 }
 
 // Backward compatibility alias for classifyProjectCategory

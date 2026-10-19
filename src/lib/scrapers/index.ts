@@ -8,6 +8,7 @@
 // ==============================================================================
 
 import { UnifiedProject, FreelancePlatform, PROJECT_INSIGHT_KEYS, buildPostText } from './types';
+import { classifyProjectCategory } from '../filters/categorizer';
 import { scrapeMostaqlCategory, fetchMostaqlProjectDetails } from './mostaql';
 import { scrapeNafezlyCategory } from './nafezly';
 import { scrapeKhamsatCategory } from './khamsat';
@@ -107,9 +108,14 @@ async function mergeAndEnrichInsights(projects: UnifiedProject[]): Promise<void>
     batch.forEach((p, idx) => {
       const d = details[idx];
       if (!d) return;
-      const { description, budget_min, budget_max, ...insights } = d;
+      const { description, budget_min, budget_max, platform_category, ...insights } = d;
       Object.assign(p, insights);
       if (description && description.length > (p.description || '').length) p.description = description;
+      // Re-classify with the full description, using Mostaql's own category when the text is vague
+      if (platform_category) {
+        p.category = classifyProjectCategory(`${p.title} ${p.description}`, platform_category);
+        p.category_slug = p.category;
+      }
       // The project page's budget range is authoritative
       if (budget_max) {
         p.budget_min = budget_min ?? budget_max;
@@ -153,25 +159,27 @@ export async function scrapeAllPlatforms(
   batch: 'all' | 'arab' | 'global' = 'all'
 ): Promise<UnifiedProject[]> {
   const promises: Promise<UnifiedProject[]>[] = [];
+  // 'all' reads each platform's newest page across every category, so take the whole page
+  const everything = categorySlug === 'all';
 
   // 1. Arab Platforms (5)
   if (batch === 'all' || batch === 'arab') {
     promises.push(
-      scrapeMostaqlCategory(categorySlug, 20),
-      scrapeNafezlyCategory(categorySlug, 20),
-      scrapeKhamsatCategory(categorySlug, 15),
-      scrapeKafiilCategory(categorySlug, 15),
-      scrapeBaeedCategory(categorySlug, 15)
+      scrapeMostaqlCategory(categorySlug, everything ? 25 : 20),
+      scrapeNafezlyCategory(categorySlug, everything ? 30 : 20),
+      scrapeKhamsatCategory(categorySlug, everything ? 40 : 15),
+      scrapeKafiilCategory(categorySlug, everything ? 20 : 15),
+      scrapeBaeedCategory(categorySlug, everything ? 20 : 15)
     );
   }
 
   // 2. Global Platforms (4)
   if (batch === 'all' || batch === 'global') {
     promises.push(
-      scrapeFreelancerCategory(categorySlug, 20),
-      scrapeRemoteOkCategory(categorySlug, 20),
-      scrapeWwrCategory(categorySlug, 20),
-      scrapePphCategory(categorySlug, 15)
+      scrapeFreelancerCategory(categorySlug, everything ? 50 : 20),
+      scrapeRemoteOkCategory(categorySlug, everything ? 30 : 20),
+      scrapeWwrCategory(categorySlug, everything ? 30 : 20),
+      scrapePphCategory(categorySlug, 20)
     );
   }
 

@@ -46,6 +46,8 @@ interface PphJob {
   open?: boolean;
   proposalCount?: number;
   client?: { country?: string; reg_dt?: string; shortName?: string };
+  category?: { cate_name?: string; slug?: string };
+  sub_category?: { subcate_name?: string } | string;
 }
 
 /** Pulls the job objects out of the page's `window.PPHReact.initialState = {...};` script. */
@@ -116,7 +118,8 @@ export async function scrapePphCategory(
           budget_max: isHourly ? null : budget,
           currency,
           language: 'en',
-          category: classifyProjectCategory(`${job.title} ${description}`, categorySlug),
+          // PPH's own category ("Technology & Programming", ...) is the best hint
+          category: classifyProjectCategory(`${job.title} ${description}`, job.category?.cate_name || categorySlug),
           // posted_dt is "YYYY-MM-DD HH:mm:ss" (UK time); treat as UTC
           published_at: job.posted_dt
             ? new Date(job.posted_dt.replace(' ', 'T') + 'Z').toISOString()

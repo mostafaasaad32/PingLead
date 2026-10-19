@@ -28,8 +28,8 @@ const results = [];
 
 function record(id, name, status, detail = "") {
   results.push({ id, name, status, detail });
-  const icon = status === "pass" ? "✅" : status === "fail" ? "❌" : "⏭️ ";
-  console.log(`${icon} [${id}] ${name}${detail ? ` — ${detail}` : ""}`);
+  const icon = status === "pass" ? "âœ…" : status === "fail" ? "âŒ" : "â­ï¸ ";
+  console.log(`${icon} [${id}] ${name}${detail ? ` â€” ${detail}` : ""}`);
 }
 
 async function request(method, urlPath, body, headers = {}) {
@@ -54,12 +54,12 @@ function expectStatus(id, name, actual, expected) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ------------------------------------------------------------------------------
-console.log(`\n🔍 PingLead security smoke tests against ${BASE_URL}\n`);
+console.log(`\nðŸ” PingLead security smoke tests against ${BASE_URL}\n`);
 
 try {
   await fetch(BASE_URL);
 } catch {
-  console.error(`❌ Cannot reach ${BASE_URL}. Start the app first with: npm run dev`);
+  console.error(`âŒ Cannot reach ${BASE_URL}. Start the app first with: npm run dev`);
   process.exit(1);
 }
 
@@ -141,29 +141,30 @@ try {
 
 // B2 + B1: category rotation and no duplicate alerts (two real cycles)
 if (QUICK) {
-  record("B2", "Cron rotates through categories", "skip", "--quick");
+  record("B2", "Cron scrapes all categories on all platforms", "skip", "--quick");
   record("B1", "Telegram alerts sent only for new matches", "skip", "--quick");
 } else {
   const cronHeaders = process.env.CRON_SECRET ? { Authorization: `Bearer ${process.env.CRON_SECRET}` } : {};
 
-  console.log("\n⏳ Running scrape cycle 1 (takes ~15s)...");
+  console.log("\nâ³ Running scrape cycle 1 (takes ~15s)...");
   const run1 = await request("GET", "/api/cron/ingest?scrape=true", null, cronHeaders);
 
   const msToNextMinute = 60_000 - (Date.now() % 60_000) + 2_000;
-  console.log(`⏳ Waiting ${Math.round(msToNextMinute / 1000)}s for the next rotation slot...`);
+  console.log(`â³ Waiting ${Math.round(msToNextMinute / 1000)}s for the next rotation slot...`);
   await sleep(msToNextMinute);
 
-  console.log("⏳ Running scrape cycle 2...");
+  console.log("â³ Running scrape cycle 2...");
   const run2 = await request("GET", "/api/cron/ingest?scrape=true", null, cronHeaders);
 
   if (!run1.json?.ok || !run2.json?.ok) {
-    record("B2", "Cron rotates through categories", "fail",
+    record("B2", "Cron scrapes all categories on all platforms", "fail",
       `cron error: ${run1.json?.error || run2.json?.error || `HTTP ${run1.status}/${run2.status}`}`);
   } else {
-    const c1 = (run1.json.categoriesScraped || []).join(", ");
-    const c2 = (run2.json.categoriesScraped || []).join(", ");
-    record("B2", "Cron rotates through categories", c1 && c2 && c1 !== c2 ? "pass" : "fail",
-      `cycle 1: [${c1}] → cycle 2: [${c2}]`);
+    // Each cycle reads every platform's newest page across all categories
+    const cats = (run2.json.categoriesScraped || []).join(", ");
+    const platforms = Object.keys(run2.json.ingestionStats?.[0]?.platformBreakdown || {});
+    record("B2", "Cron scrapes all categories on all platforms", cats === "all" && platforms.length >= 7 ? "pass" : "fail",
+      `categories: [${cats}], platforms with projects: ${platforms.length} (${platforms.join(", ")})`);
 
     const okAlerts = [run1.json, run2.json].every(
       (r) => (r.smartTelegramDispatched || 0) <= (r.actionsCreated || 0)
@@ -179,5 +180,5 @@ const passed = results.filter((r) => r.status === "pass").length;
 const failed = results.filter((r) => r.status === "fail").length;
 const skipped = results.filter((r) => r.status === "skip").length;
 
-console.log(`\n${failed ? "❌" : "✅"} ${passed} passed, ${failed} failed, ${skipped} skipped\n`);
+console.log(`\n${failed ? "âŒ" : "âœ…"} ${passed} passed, ${failed} failed, ${skipped} skipped\n`);
 process.exit(failed ? 1 : 0);

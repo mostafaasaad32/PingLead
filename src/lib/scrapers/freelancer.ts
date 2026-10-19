@@ -70,7 +70,12 @@ export async function scrapeFreelancerCategory(
       const budgetStr = (min || max) ? `${min || 0} - ${max || 0} ${currency}` : null;
       const description = p.preview_description || p.title;
 
-      const cat = classifyProjectCategory(`${p.title} ${description}`, categorySlug);
+      // Freelancer's own skill categories ("Websites, IT & Software", ...) are the best hint
+      const jobHint = (p.jobs || [])
+        .map((j: any) => `${j.category?.name || ''} ${j.name || ''}`)
+        .join(' ')
+        .trim();
+      const cat = classifyProjectCategory(`${p.title} ${description}`, jobHint || categorySlug);
 
       results.push(
         createUnifiedProject({

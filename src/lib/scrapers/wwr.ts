@@ -92,7 +92,9 @@ export async function scrapeWwrCategory(
         author = parts[0].trim();
       }
 
-      const cat = classifyProjectCategory(`${title} ${desc}`, categorySlug);
+      // WWR's own <category> (e.g. "Full-Stack Programming") is the best hint when the text is vague
+      const wwrCategory = itemXml.match(/<category>([\s\S]*?)<\/category>/i)?.[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/i, '$1').trim();
+      const cat = classifyProjectCategory(`${title} ${desc}`, wwrCategory || categorySlug);
       const budget = extractCleanBudget(`${title} ${desc}`);
 
       projects.push(
