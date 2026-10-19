@@ -60,7 +60,7 @@ export type ProjectLanguage = 'ar' | 'en';
 
 export type ToneOfVoice = 'confident' | 'friendly' | 'analytical' | 'direct';
 
-export type ProjectActionStatus = 'saved' | 'applied' | 'ignored' | 'won';
+export type ProjectActionStatus = 'saved' | 'applied' | 'replied' | 'ignored' | 'won';
 
 // ==============================================================================
 // Metadata for 20 Platforms

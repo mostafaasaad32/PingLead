@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { BarChart3, TrendingUp, TrendingDown, Target, Send, Trophy, Sparkles, Filter } from "lucide-react";
+import { BarChart3, TrendingUp, TrendingDown, Target, Send, Trophy, Sparkles, Filter, MessageCircle } from "lucide-react";
 import { PLATFORMS_METADATA, CATEGORIES_METADATA } from "@/lib/scrapers/types";
 
 interface Breakdown {
   key: string;
   matched: number;
   applied: number;
+  replied: number;
   won: number;
 }
 
@@ -17,7 +18,9 @@ interface InsightsData {
   totals: {
     matched: number;
     applied: number;
+    replied: number;
     won: number;
+    replyRate: number | null;
     winRate: number | null;
     proposals: number;
     prevMatched: number;
@@ -26,6 +29,7 @@ interface InsightsData {
   daily: { date: string; matched: number; applied: number }[];
   byPlatform: Breakdown[];
   byCategory: Breakdown[];
+  templates: { key: string; name: string | null; sent: number; replied: number; won: number }[];
   market: { key: string; count: number }[];
   marketWindowDays: number;
 }
@@ -282,7 +286,7 @@ export default function InsightsPage() {
       {data && (
         <div className={`space-y-6 transition-opacity ${loading ? "opacity-50" : ""}`}>
           {/* KPI tiles */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <StatTile
               label="مشاريع وصلتك"
               value={fmt(t!.matched)}
@@ -299,6 +303,20 @@ export default function InsightsPage() {
                     {Math.round((t!.applied / t!.matched) * 100)}% من المشاريع اللي وصلتك
                   </span>
                 ) : null
+              }
+            />
+            <StatTile
+              label="العميل رد"
+              value={fmt(t!.replied)}
+              icon={<MessageCircle className="w-4 h-4" />}
+              footer={
+                t!.replyRate !== null ? (
+                  <span className="text-[11px] text-slate-500">
+                    معدل الرد <b className="text-slate-800">{t!.replyRate}%</b>
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-slate-400">علّم «العميل رد» من المتتبع</span>
+                )
               }
             />
             <StatTile
@@ -360,6 +378,7 @@ export default function InsightsPage() {
                         <th className="text-right font-semibold px-5 py-2.5">المنصة</th>
                         <th className="text-right font-semibold px-3 py-2.5 w-[40%]">وصلتك</th>
                         <th className="text-right font-semibold px-3 py-2.5">قدّمت</th>
+                        <th className="text-right font-semibold px-3 py-2.5">رد</th>
                         <th className="text-right font-semibold px-3 py-2.5">كسبت</th>
                         <th className="text-right font-semibold px-5 py-2.5">معدل الفوز</th>
                       </tr>
@@ -382,6 +401,7 @@ export default function InsightsPage() {
                               </div>
                             </td>
                             <td className="px-3 py-3 tabular-nums text-slate-700">{fmt(r.applied)}</td>
+                            <td className="px-3 py-3 tabular-nums text-slate-700">{fmt(r.replied)}</td>
                             <td className="px-3 py-3 tabular-nums text-slate-700">{fmt(r.won)}</td>
                             <td className="px-5 py-3 tabular-nums text-slate-700">
                               {r.applied > 0 ? `${Math.round((r.won / r.applied) * 100)}%` : "—"}
@@ -393,6 +413,44 @@ export default function InsightsPage() {
                   </table>
                 </div>
               </section>
+
+              {data.templates.length > 0 && (
+                <section className="vollna-card bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="p-5 sm:p-6 pb-3">
+                    <h2 className="text-sm font-black text-slate-900">نتايج قوالب A/B</h2>
+                    <p className="text-[11px] text-slate-500 mt-0.5">من طابور الـ Auto-Bidding: العروض اللي قدّمتها بكل قالب، وكام منها جاله رد</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs min-w-[420px]">
+                      <thead>
+                        <tr className="text-slate-500 border-y border-slate-100 bg-slate-50/60">
+                          <th className="text-right font-semibold px-5 py-2.5">القالب</th>
+                          <th className="text-right font-semibold px-3 py-2.5">اتقدّم</th>
+                          <th className="text-right font-semibold px-3 py-2.5">رد</th>
+                          <th className="text-right font-semibold px-3 py-2.5">كسب</th>
+                          <th className="text-right font-semibold px-5 py-2.5">معدل الرد</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.templates.map((tpl) => (
+                          <tr key={tpl.key} className="border-b border-slate-100 last:border-0">
+                            <td className="px-5 py-3 font-bold text-slate-800">
+                              {tpl.key}
+                              {tpl.name ? <span className="font-normal text-slate-500"> · {tpl.name}</span> : null}
+                            </td>
+                            <td className="px-3 py-3 tabular-nums text-slate-700">{fmt(tpl.sent)}</td>
+                            <td className="px-3 py-3 tabular-nums text-slate-700">{fmt(tpl.replied)}</td>
+                            <td className="px-3 py-3 tabular-nums text-slate-700">{fmt(tpl.won)}</td>
+                            <td className="px-5 py-3 tabular-nums font-bold text-slate-900">
+                              {tpl.sent > 0 ? `${Math.round((tpl.replied / tpl.sent) * 100)}%` : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <section className="vollna-card p-5 sm:p-6 bg-white border border-slate-200 rounded-2xl space-y-4">

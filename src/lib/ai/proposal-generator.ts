@@ -29,6 +29,8 @@ STRICT WINNING FORMULA:
 2. ACTIONABLE ROADMAP: 2-3 clear, punchy bullet points detailing how you will deliver this smoothly and fast.
 3. SOCIAL PROOF & LIVE PORTFOLIO CITE: If a relevant portfolio project with a live link is provided in the prompt, cite it naturally as tangible proof (e.g. "قمت ببناء عمل مماثل يمكنك معاينته مباشرة هنا: [رابط]" or "I previously developed a similar project you can test live here: [link]").
 4. CLOSING SMART QUESTION: End with a direct, insightful question about their tech stack, timeline, or asset availability to prompt an instant reply.
+5. CLIENT'S OWN QUESTIONS: If the project description asks the freelancer anything or requests specific information (e.g. "اذكر خبرتك", "أرسل أعمال سابقة", "كم المدة؟", "what is your rate?"), answer each request briefly and directly inside the proposal before the closing question. Never ignore a direct request from the client.
+6. NEVER INVENT FACTS: Only claim experience, numbers or past projects that appear in the freelancer profile or portfolio provided. If there is no matching portfolio item, describe the approach instead of inventing past work.
 
 LANGUAGE & TONE RULES:
 - If the project is in Arabic, write in modern, confident, and professional Arabic.
@@ -48,6 +50,8 @@ export interface GenerateProposalInput {
   portfolioItems?: PortfolioItem[];
   /** Market price/timeline baseline (see pricingPromptHint) for the model to adjust to the real scope */
   pricingHint?: string;
+  /** The user's standing instructions from their profile, applied to every proposal */
+  standingInstructions?: string | null;
 }
 
 export interface GenerateProposalOutput {
@@ -103,6 +107,7 @@ FREELANCER PROFILE:
 - Core Skills: ${skillsString}
 - Tone of Voice: ${tone} (Write with a ${tone} attitude)
 ${input.customInstructions ? `- Special User Custom Instructions: ${input.customInstructions}` : ''}
+${input.standingInstructions?.trim() ? `- The freelancer's standing instructions (ALWAYS follow these): ${input.standingInstructions.trim().slice(0, 1000)}` : ''}
 
 ${input.pricingHint ? `PRICING GUIDANCE (REQUIRED):\n${input.pricingHint}\nThe proposal MUST include one explicit sentence with your price and delivery time (e.g. "أقدر أسلّم خلال 7 أيام بتكلفة 150$" / "I can deliver in 7 days for $150"), placed right before the closing question.\n` : ''}
 ${portfolioPromptContext}

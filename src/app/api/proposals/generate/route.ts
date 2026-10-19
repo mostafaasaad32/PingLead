@@ -173,6 +173,7 @@ export async function POST(req: NextRequest) {
         freelancerSkills: effectiveSkills,
         toneOfVoice: effectiveTone,
         customInstructions: custom_instructions,
+        standingInstructions: (profile as any)?.proposal_instructions,
         portfolioItems,
         pricingHint: pricing ? pricingPromptHint(pricing) : undefined,
       });

@@ -78,7 +78,9 @@ export async function GET(req: NextRequest) {
 
     // Calculate real CRM metrics
     const totalCount = trackedItems.length;
-    const appliedCount = trackedItems.filter((i) => i.status === "applied").length;
+    // Funnel stages imply the earlier ones: replied/won projects were applied to
+    const appliedCount = trackedItems.filter((i) => ["applied", "replied", "won"].includes(i.status)).length;
+    const repliedCount = trackedItems.filter((i) => ["replied", "won"].includes(i.status)).length;
     const wonCount = trackedItems.filter((i) => i.status === "won").length;
     const savedCount = trackedItems.filter((i) => i.status === "saved").length;
     const proposalsCount = trackedItems.filter((i) => Boolean(i.generated_proposal)).length;
@@ -89,6 +91,7 @@ export async function GET(req: NextRequest) {
       metrics: {
         total: totalCount,
         applied: appliedCount,
+        replied: repliedCount,
         won: wonCount,
         saved: savedCount,
         proposals_generated: proposalsCount,

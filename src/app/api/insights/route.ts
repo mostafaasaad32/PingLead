@@ -23,13 +23,20 @@ interface Breakdown {
   key: string;
   matched: number;
   applied: number;
+  replied: number;
   won: number;
 }
 
+// Funnel: saved -> applied -> replied -> won. Later stages imply the earlier ones
+// (a won project was applied to and got a reply).
+const isApplied = (s: string) => s === "applied" || s === "replied" || s === "won";
+const isReplied = (s: string) => s === "replied" || s === "won";
+
 function bump(map: Map<string, Breakdown>, key: string, status: string) {
-  const row = map.get(key) || { key, matched: 0, applied: 0, won: 0 };
+  const row = map.get(key) || { key, matched: 0, applied: 0, replied: 0, won: 0 };
   row.matched++;
-  if (status === "applied" || status === "won") row.applied++;
+  if (isApplied(status)) row.applied++;
+  if (isReplied(status)) row.replied++;
   if (status === "won") row.won++;
   map.set(key, row);
 }
@@ -62,7 +69,7 @@ export async function GET(req: NextRequest) {
     const all: any[] = [];
     for (let from = 0; from < MAX_ROWS; from += PAGE_SIZE) {
       const { data, error } = await actionsTable()
-        .select("status, created_at, projects(platform, category)")
+        .select("status, created_at, project_id, projects(platform, category)")
         .eq("user_id", user.id)
         .gte("created_at", since)
         .order("created_at", { ascending: true })
@@ -91,7 +98,7 @@ export async function GET(req: NextRequest) {
       .eq("user_id", user.id)
       .gte("created_at", prevSince)
       .lt("created_at", since)
-      .in("status", ["applied", "won"]),
+      .in("status", ["applied", "replied", "won"]),
     ...PLATFORMS_METADATA.map((p) =>
       (supabaseAdmin.from("projects") as any)
         .select("id", { count: "exact", head: true })
@@ -114,27 +121,52 @@ export async function GET(req: NextRequest) {
 
   const byPlatform = new Map<string, Breakdown>();
   const byCategory = new Map<string, Breakdown>();
+  const statusByProject = new Map<string, string>();
   let matched = 0;
   let applied = 0;
+  let replied = 0;
   let won = 0;
 
   for (const row of actionsRes.data || []) {
     const project = Array.isArray(row.projects) ? row.projects[0] : row.projects;
     const status: string = row.status;
+    if (row.project_id) statusByProject.set(row.project_id, status);
     if (status === "ignored") continue;
 
     matched++;
-    if (status === "applied" || status === "won") applied++;
+    if (isApplied(status)) applied++;
+    if (isReplied(status)) replied++;
     if (status === "won") won++;
 
     const bucket = daily.get(dayKey.format(new Date(row.created_at)));
     if (bucket) {
       bucket.matched++;
-      if (status === "applied" || status === "won") bucket.applied++;
+      if (isApplied(status)) bucket.applied++;
     }
 
     bump(byPlatform, project?.platform || "other", status);
     bump(byCategory, project?.category || "other", status);
+  }
+
+  // A/B template results: auto-bidding queue items (which template variant) joined with
+  // what happened to that project in the CRM
+  const { data: queueRows } = await (supabaseAdmin.from("auto_bid_queue") as any)
+    .select("project_id, template_variant, proposal_templates(name)")
+    .eq("user_id", user.id)
+    .gte("created_at", since)
+    .not("template_variant", "is", null)
+    .limit(PAGE_SIZE);
+
+  const templateMap = new Map<string, { key: string; name: string | null; sent: number; replied: number; won: number }>();
+  for (const q of queueRows || []) {
+    const status = statusByProject.get(q.project_id) || "";
+    if (!isApplied(status)) continue; // only proposals the user actually sent
+    const tpl = Array.isArray(q.proposal_templates) ? q.proposal_templates[0] : q.proposal_templates;
+    const row = templateMap.get(q.template_variant) || { key: q.template_variant, name: tpl?.name || null, sent: 0, replied: 0, won: 0 };
+    row.sent++;
+    if (isReplied(status)) row.replied++;
+    if (status === "won") row.won++;
+    templateMap.set(q.template_variant, row);
   }
 
   const sortRows = (map: Map<string, Breakdown>) => Array.from(map.values()).sort((a, b) => b.matched - a.matched);
@@ -146,7 +178,9 @@ export async function GET(req: NextRequest) {
     totals: {
       matched,
       applied,
+      replied,
       won,
+      replyRate: applied > 0 ? Math.round((replied / applied) * 100) : null,
       winRate: applied > 0 ? Math.round((won / applied) * 100) : null,
       proposals: proposalsRes.count || 0,
       prevMatched: prevMatchedRes.count || 0,
@@ -155,6 +189,7 @@ export async function GET(req: NextRequest) {
     daily: Array.from(daily.values()),
     byPlatform: sortRows(byPlatform),
     byCategory: sortRows(byCategory),
+    templates: Array.from(templateMap.values()).sort((a, b) => a.key.localeCompare(b.key)),
     market: PLATFORMS_METADATA.map((p, i) => ({ key: p.id, count: marketRes[i]?.count || 0 }))
       .filter((m) => m.count > 0)
       .sort((a, b) => b.count - a.count),

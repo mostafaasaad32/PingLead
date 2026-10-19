@@ -22,7 +22,7 @@ import {
 interface TrackedProject {
   id: string;
   project_id: string;
-  status: "saved" | "applied" | "won" | "ignored";
+  status: "saved" | "applied" | "replied" | "won" | "ignored";
   generated_proposal?: string | null;
   title: string;
   description: string;
@@ -211,6 +211,7 @@ export default function TrackerPage() {
             { id: "all", label: "الكل" },
             { id: "saved", label: "المحفوظة" },
             { id: "applied", label: "تم التقديم" },
+            { id: "replied", label: "العميل رد 💬" },
             { id: "won", label: "فائزة 🎉" },
             { id: "ignored", label: "مستبعدة" },
           ].map((tab) => (
@@ -297,6 +298,8 @@ export default function TrackerPage() {
                       className={`text-xs px-2.5 py-1.5 rounded-lg border font-semibold focus:outline-none ${
                         item.status === "applied"
                           ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                          : item.status === "replied"
+                          ? "bg-violet-500/10 text-violet-300 border-violet-500/30"
                           : item.status === "won"
                           ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                           : item.status === "ignored"
@@ -306,6 +309,7 @@ export default function TrackerPage() {
                     >
                       <option value="saved">💾 محفوظ</option>
                       <option value="applied">✅ تم التقديم</option>
+                      <option value="replied">💬 العميل رد</option>
                       <option value="won">🎉 فوز بالمشروع</option>
                       <option value="ignored">🚫 مستبعد</option>
                     </select>

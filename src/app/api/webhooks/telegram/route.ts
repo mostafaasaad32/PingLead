@@ -307,10 +307,10 @@ export async function POST(req: NextRequest) {
         let freelancerBio = '';
         let freelancerSkills: string | string[] = '';
         let toneOfVoice = 'confident';
+        let standingInstructions: string | null = null;
 
-        const { data: fp } = await supabaseAdmin
-          .from('freelancer_profiles')
-          .select('bio, title, skills, tone_of_voice, full_name')
+        const { data: fp } = await (supabaseAdmin.from('freelancer_profiles') as any)
+          .select('bio, title, skills, tone_of_voice, full_name, proposal_instructions')
           .eq('user_id', effectiveUserId)
           .maybeSingle();
 
@@ -318,6 +318,7 @@ export async function POST(req: NextRequest) {
           freelancerBio = fp.bio || fp.title || '';
           freelancerSkills = fp.skills || '';
           toneOfVoice = fp.tone_of_voice || 'confident';
+          standingInstructions = fp.proposal_instructions || null;
         }
 
         if (!freelancerBio) {
@@ -394,6 +395,7 @@ export async function POST(req: NextRequest) {
               freelancerSkills,
               toneOfVoice,
               portfolioItems,
+              standingInstructions,
             });
           } catch (err) {
             await refundAiCredit(effectiveUserId);

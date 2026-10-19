@@ -41,6 +41,7 @@ export default function MyProfilePage() {
     "confident" | "friendly" | "analytical" | "direct"
   >("confident");
   const [skillsText, setSkillsText] = useState("");
+  const [proposalInstructions, setProposalInstructions] = useState("");
 
   // Danger zone state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -81,6 +82,7 @@ export default function MyProfilePage() {
           setSkillsText(
             Array.isArray(profile.skills) ? profile.skills.join(", ") : ""
           );
+          setProposalInstructions((profile as any).proposal_instructions || "");
         }
       } catch (err: any) {
         console.error("Error loading profile:", err);
@@ -118,6 +120,7 @@ export default function MyProfilePage() {
           time_format: timeFormat,
           tone_of_voice: toneOfVoice,
           skills: skillsArray,
+          proposal_instructions: proposalInstructions.trim() || null,
           updated_at: new Date().toISOString(),
         })
         .eq("user_id", userId);
@@ -276,6 +279,23 @@ export default function MyProfilePage() {
               onChange={(e) => setSkillsText(e.target.value)}
               className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white transition"
             />
+          </div>
+
+          {/* Standing instructions for every AI proposal */}
+          <div>
+            <label htmlFor="proposal-instructions" className="block text-xs font-bold text-slate-700 mb-1.5">
+              تعليمات ثابتة لكل عروضك
+            </label>
+            <textarea
+              id="proposal-instructions"
+              rows={3}
+              maxLength={1000}
+              placeholder="مثلاً: اذكر دايماً إن عندي ضمان شهر بعد التسليم، ومتقترحش مدة أقل من 3 أيام."
+              value={proposalInstructions}
+              onChange={(e) => setProposalInstructions(e.target.value)}
+              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 focus:bg-white transition leading-relaxed"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">الـ AI بيلتزم بيها في كل عرض بيكتبهولك، من الموقع أو من تليجرام.</p>
           </div>
 
           {/* Tone of Voice */}

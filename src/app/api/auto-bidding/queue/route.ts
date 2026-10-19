@@ -157,7 +157,7 @@ export async function POST(req: NextRequest) {
       try {
         const [{ data: profile }, { data: portfolioRows }, { data: template }] = await Promise.all([
           (supabaseAdmin.from("freelancer_profiles") as any)
-            .select("bio, title, skills, tone_of_voice")
+            .select("bio, title, skills, tone_of_voice, proposal_instructions")
             .eq("user_id", user.id)
             .maybeSingle(),
           (supabaseAdmin.from("portfolio_items") as any).select("*").eq("user_id", user.id),
@@ -201,6 +201,7 @@ export async function POST(req: NextRequest) {
             category: p.category,
           })),
           pricingHint: pricing ? pricingPromptHint(pricing) : undefined,
+          standingInstructions: profile?.proposal_instructions,
         });
 
         let proposal = result.proposal;

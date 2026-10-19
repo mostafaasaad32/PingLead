@@ -122,7 +122,7 @@ function InsightChips({
 interface TrackedProjectAction {
   id: string;
   project_id: string;
-  status: "saved" | "applied" | "ignored" | "won";
+  status: "saved" | "applied" | "replied" | "ignored" | "won";
   generated_proposal?: string | null;
   notes?: string | null;
 }
@@ -348,7 +348,7 @@ export default function DashboardPage() {
   // Handle Change Project Status (Applied, Won, etc.)
   const handleChangeStatus = async (
     leadId: string,
-    newStatus: "saved" | "applied" | "won" | "ignored"
+    newStatus: "saved" | "applied" | "replied" | "won" | "ignored"
   ) => {
     setTrackedActions((prev) => ({
       ...prev,
@@ -818,6 +818,7 @@ export default function DashboardPage() {
                           <option value="new">جديد</option>
                           <option value="saved">محفوظ</option>
                           <option value="applied">تم التقديم</option>
+                          <option value="replied">العميل رد 💬</option>
                           <option value="won">تم الفوز 🎉</option>
                         </select>
                       </div>
