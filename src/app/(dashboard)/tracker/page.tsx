@@ -18,6 +18,7 @@ import {
   Layers,
   ArrowUpDown,
 } from "lucide-react";
+import { getPlatformTheme, PlatformBadge, PlatformLogo } from "@/lib/platform-themes";
 
 interface TrackedProject {
   id: string;
@@ -253,94 +254,102 @@ export default function TrackerPage() {
       ) : (
         <div className="space-y-3">
           {filteredItems.map((item) => {
-            const badge = getPlatformBadge(item.platform);
+            const theme = getPlatformTheme(item.platform);
             const isExpanded = expandedProposalId === item.id;
 
             return (
               <div
                 key={item.id}
-                className="p-4 rounded-xl bg-[#0b101e] border border-white/10 hover:border-amber-500/30 transition shadow-sm"
+                className={`relative overflow-hidden rounded-xl bg-[#0b101e] border transition-all duration-200 shadow-sm ${theme.cardBorder} ${theme.cardHoverBorder} hover:shadow-md ${theme.cardGlow}`}
               >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  {/* Project Info */}
-                  <div className="space-y-1.5 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`text-[10px] px-2 py-0.5 rounded border font-semibold ${badge.bg}`}>
-                        {badge.label}
-                      </span>
+                {/* Platform Top Accent Stripe */}
+                <div className={`h-1 w-full bg-gradient-to-r ${theme.topStripeGradient}`} />
 
-                      {item.budget && (
-                        <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded font-mono">
-                          💰 {item.budget}
+                <div className="p-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    {/* Project Info */}
+                    <div className="space-y-2 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <PlatformBadge platform={item.platform} />
+
+                        {item.budget && (
+                          <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded font-mono">
+                            💰 {item.budget}
+                          </span>
+                        )}
+
+                        <span className="text-[10px] text-gray-400 flex items-center gap-1 font-mono">
+                          <Clock className="w-2.5 h-2.5" />
+                          {formatRelativeTime(item.published_at)}
                         </span>
-                      )}
+                      </div>
 
-                      <span className="text-[10px] text-gray-400 flex items-center gap-1 font-mono">
-                        <Clock className="w-2.5 h-2.5" />
-                        {formatRelativeTime(item.published_at)}
-                      </span>
+                      <h3 className="text-xs sm:text-sm font-bold text-white transition">
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className={`flex items-center gap-1.5 ${theme.titleHover}`}
+                        >
+                          <span>{item.title}</span>
+                          <ExternalLink className="w-3 h-3 opacity-60 inline" />
+                        </a>
+                      </h3>
                     </div>
 
-                    <h3 className="text-xs sm:text-sm font-bold text-white hover:text-amber-300 transition">
-                      <a href={item.url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5">
-                        <span>{item.title}</span>
-                        <ExternalLink className="w-3 h-3 opacity-60 inline" />
-                      </a>
-                    </h3>
-                  </div>
-
-                  {/* Actions & Status Dropdown */}
-                  <div className="flex items-center gap-2 self-end sm:self-center">
-                    {/* Status Selector */}
-                    <select
-                      value={item.status}
-                      onChange={(e) => handleUpdateStatus(item.id, e.target.value)}
-                      className={`text-xs px-2.5 py-1.5 rounded-lg border font-semibold focus:outline-none ${
-                        item.status === "applied"
-                          ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
-                          : item.status === "replied"
-                          ? "bg-violet-500/10 text-violet-300 border-violet-500/30"
-                          : item.status === "won"
-                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                          : item.status === "ignored"
-                          ? "bg-gray-500/10 text-gray-400 border-gray-500/30"
-                          : "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                      }`}
-                    >
-                      <option value="saved">💾 محفوظ</option>
-                      <option value="applied">✅ تم التقديم</option>
-                      <option value="replied">💬 العميل رد</option>
-                      <option value="won">🎉 فوز بالمشروع</option>
-                      <option value="ignored">🚫 مستبعد</option>
-                    </select>
-
-                    {item.generated_proposal && (
-                      <button
-                        onClick={() =>
-                          setExpandedProposalId(isExpanded ? null : item.id)
-                        }
-                        className="text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-3 py-1.5 rounded-lg transition flex items-center gap-1"
+                    {/* Actions & Status Dropdown */}
+                    <div className="flex items-center gap-2 self-end sm:self-center flex-wrap">
+                      {/* Status Selector */}
+                      <select
+                        value={item.status}
+                        onChange={(e) => handleUpdateStatus(item.id, e.target.value)}
+                        className={`text-xs px-2.5 py-1.5 rounded-lg border font-semibold focus:outline-none ${
+                          item.status === "applied"
+                            ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                            : item.status === "replied"
+                            ? "bg-violet-500/10 text-violet-300 border-violet-500/30"
+                            : item.status === "won"
+                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                            : item.status === "ignored"
+                            ? "bg-gray-500/10 text-gray-400 border-gray-500/30"
+                            : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                        }`}
                       >
-                        <Sparkles className="w-3 h-3 text-indigo-400" />
-                        <span>عرض التقديم</span>
-                        {isExpanded ? (
-                          <ChevronUp className="w-3 h-3" />
-                        ) : (
-                          <ChevronDown className="w-3 h-3" />
-                        )}
-                      </button>
-                    )}
+                        <option value="saved">💾 محفوظ</option>
+                        <option value="applied">✅ تم التقديم</option>
+                        <option value="replied">💬 العميل رد</option>
+                        <option value="won">🎉 فوز بالمشروع</option>
+                        <option value="ignored">🚫 مستبعد</option>
+                      </select>
 
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 px-3 py-1.5 rounded-lg transition"
-                    >
-                      فتح بالمنصة
-                    </a>
+                      {item.generated_proposal && (
+                        <button
+                          onClick={() =>
+                            setExpandedProposalId(isExpanded ? null : item.id)
+                          }
+                          className="text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-3 py-1.5 rounded-lg transition flex items-center gap-1"
+                        >
+                          <Sparkles className="w-3 h-3 text-indigo-400" />
+                          <span>عرض التقديم</span>
+                          {isExpanded ? (
+                            <ChevronUp className="w-3 h-3" />
+                          ) : (
+                            <ChevronDown className="w-3 h-3" />
+                          )}
+                        </button>
+                      )}
+
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5"
+                      >
+                        <PlatformLogo platform={theme.id} size={13} />
+                        <span>فتح في {theme.nameAr}</span>
+                      </a>
+                    </div>
                   </div>
-                </div>
 
                 {/* Expanded Proposal Drawer */}
                 {isExpanded && item.generated_proposal && (
@@ -374,6 +383,7 @@ export default function TrackerPage() {
                     </div>
                   </div>
                 )}
+                </div>
               </div>
             );
           })}

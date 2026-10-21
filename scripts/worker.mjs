@@ -33,7 +33,7 @@ if (!CRON_SECRET) {
 }
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.APP_URL || `http://localhost:${PORT}`;
-const INTERVAL_SECONDS = 60; // Automated scan every 60 seconds
+const INTERVAL_SECONDS = 30; // Hyper real-time automated scan every 30 seconds
 
 console.log("==================================================");
 console.log("🚀 PingLead 24/7 Autonomous Background Worker Started");

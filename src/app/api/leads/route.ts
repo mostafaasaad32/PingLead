@@ -32,23 +32,26 @@ async function attachProjectInsights(leads: any[]): Promise<any[]> {
 
   const PRICING_KEYS = ['budget_min', 'budget_max', 'currency', 'category'];
   const rowsByKey = new Map<string, Record<string, any>>();
-  for (const [platform, ids] of idsByPlatform) {
-    const { data, error } = await (supabaseAdmin.from('projects') as any)
-      .select(['external_id', ...PRICING_KEYS, ...PROJECT_INSIGHT_KEYS].join(','))
-      .eq('platform', platform)
-      .in('external_id', ids);
-    if (error) return leads;
-    for (const row of data || []) rowsByKey.set(`${platform}_${row.external_id}`, row);
-  }
+  await Promise.all(
+    Array.from(idsByPlatform.entries()).map(async ([platform, ids]) => {
+      const { data, error } = await (supabaseAdmin.from('projects') as any)
+        .select(['id', 'external_id', ...PRICING_KEYS, ...PROJECT_INSIGHT_KEYS].join(','))
+        .eq('platform', platform)
+        .in('external_id', ids);
+      if (!error) {
+        for (const row of data || []) rowsByKey.set(`${platform}_${row.external_id}`, row);
+      }
+    })
+  );
 
   const rates = await getRates();
 
   return Promise.all(
     leads.map(async (lead) => {
       const row = rowsByKey.get(lead.external_post_id);
-      if (!row) return { ...lead, insights: null, pricing: null };
+      if (!row) return { ...lead, project_id: null, insights: null, pricing: null };
 
-      const { external_id, budget_min, budget_max, currency, category, ...insights } = row;
+      const { id: project_id, external_id, budget_min, budget_max, currency, category, ...insights } = row;
       const pricing = await getProjectPricing(
         {
           platform: lead.platform,
@@ -63,7 +66,7 @@ async function attachProjectInsights(leads: any[]): Promise<any[]> {
         rates
       ).catch(() => null);
 
-      return { ...lead, insights, pricing };
+      return { ...lead, project_id, insights, pricing };
     })
   );
 }
@@ -79,15 +82,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'غير مصرح - يرجى تسجيل الدخول' }, { status: 401 });
     }
 
-    // Non-blocking auto-scrape for self-hosted/local runs (rate-limited to once per 60s inside triggerIngest).
-    // On Vercel the external cron does this instead.
-    if (pageLoadTriggersEnabled) triggerIngest(true).catch(() => {});
-
     const category = req.nextUrl.searchParams.get('category');
     const platform = req.nextUrl.searchParams.get('platform');
     const minScore = req.nextUrl.searchParams.get('min_score');
     const sortBy = req.nextUrl.searchParams.get('sort_by') || 'newest';
-    const limit = parseInt(req.nextUrl.searchParams.get('limit') || '100', 10);
+    const limit = parseInt(req.nextUrl.searchParams.get('limit') || '60', 10);
 
     let query = supabaseAdmin
       .from('leads_pool')
@@ -151,25 +150,25 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Also get overall counts for freelance platforms
-    const { count: totalScanned } = await supabaseAdmin
-      .from('leads_pool')
-      .select('*', { count: 'exact', head: true })
-      .in('platform', ALL_PLATFORM_IDS);
-
-    const { count: highIntentCount } = await supabaseAdmin
-      .from('leads_pool')
-      .select('*', { count: 'exact', head: true })
-      .in('platform', ALL_PLATFORM_IDS)
-      .gte('intent_score', 8);
-
-    const leadsWithInsights = await attachProjectInsights(leads || []);
+    // Run insights attachment and overall count queries concurrently in parallel
+    const [leadsWithInsights, totalScannedRes, highIntentRes] = await Promise.all([
+      attachProjectInsights(leads || []),
+      supabaseAdmin
+        .from('leads_pool')
+        .select('*', { count: 'exact', head: true })
+        .in('platform', ALL_PLATFORM_IDS),
+      supabaseAdmin
+        .from('leads_pool')
+        .select('*', { count: 'exact', head: true })
+        .in('platform', ALL_PLATFORM_IDS)
+        .gte('intent_score', 8),
+    ]);
 
     return NextResponse.json({
       ok: true,
       leads: leadsWithInsights,
-      totalScanned: totalScanned || 0,
-      highIntentCount: highIntentCount || 0,
+      totalScanned: totalScannedRes.count || 0,
+      highIntentCount: highIntentRes.count || 0,
     });
   } catch (err: any) {
     console.error('[API Leads] Unexpected error:', err);

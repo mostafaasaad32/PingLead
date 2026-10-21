@@ -150,6 +150,13 @@ export default function TopNavbar() {
       isActive: pathname.startsWith("/portfolio"),
     },
     {
+      name: "Profile Audit",
+      labelAr: "Profile Audit",
+      href: "/profile-audit",
+      icon: Sparkles,
+      isActive: pathname.startsWith("/profile-audit"),
+    },
+    {
       name: "Insights",
       labelAr: "التحليلات والمتابعة",
       href: "/insights",

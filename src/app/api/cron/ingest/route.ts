@@ -209,12 +209,21 @@ export async function GET(req: NextRequest) {
       }
 
       const newActions: { id: string; user_id: string; project_id: string }[] = [];
-      const rows = Array.from(candidates.values()).map((c) => ({ ...c, status: 'saved' }));
+      const rows = Array.from(candidates.values()).map((c) => ({ ...c, status: 'matched' }));
       for (let i = 0; i < rows.length; i += 500) {
-        const { data, error } = await (supabaseAdmin.from('user_project_actions') as any)
+        let { data, error } = await (supabaseAdmin.from('user_project_actions') as any)
           .upsert(rows.slice(i, i + 500), { onConflict: 'user_id,project_id', ignoreDuplicates: true })
           .select('id, user_id, project_id');
-        if (error) console.warn('[Cron Ingest] CRM insert error:', error.message);
+        if (error && (error as any).code === '23514') {
+          // Check constraint not yet updated with migration 0014: fallback to 'saved' tagged with auto_matched
+          const fallbackRows = rows.slice(i, i + 500).map((r) => ({ ...r, status: 'saved', notes: 'auto_matched' }));
+          const res = await (supabaseAdmin.from('user_project_actions') as any)
+            .upsert(fallbackRows, { onConflict: 'user_id,project_id', ignoreDuplicates: true })
+            .select('id, user_id, project_id');
+          data = res.data;
+          error = res.error;
+        }
+        if (error) console.warn('[Cron Ingest] CRM insert error:', (error as any).message);
         newActions.push(...(data || []));
       }
       actionsCreated = newActions.length;

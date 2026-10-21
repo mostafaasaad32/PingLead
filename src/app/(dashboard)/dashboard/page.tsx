@@ -39,9 +39,11 @@ import {
 import { getCompetitionVerdict, getClientVerdict } from "@/lib/insights/competition";
 import type { ProjectPricing } from "@/lib/insights/pricing";
 import { isCategoryMatch } from "@/lib/filters/categorizer";
+import { getPlatformTheme, PlatformBadge, PlatformLogo } from "@/lib/platform-themes";
 
 interface Lead {
   id: string;
+  project_id?: string;
   platform: string;
   external_post_id?: string;
   author_handle?: string;
@@ -122,9 +124,28 @@ function InsightChips({
 interface TrackedProjectAction {
   id: string;
   project_id: string;
-  status: "saved" | "applied" | "replied" | "ignored" | "won";
+  status: "matched" | "saved" | "applied" | "replied" | "ignored" | "won";
   generated_proposal?: string | null;
   notes?: string | null;
+}
+
+interface TrackedItem {
+  id: string;
+  project_id: string;
+  status: "matched" | "saved" | "applied" | "replied" | "ignored" | "won";
+  generated_proposal?: string | null;
+  notes?: string | null;
+  matched_filter_id?: string | null;
+  title: string;
+  description: string;
+  url: string;
+  platform: string;
+  category: string;
+  budget?: string | null;
+  budget_usd_estimate?: number | null;
+  published_at?: string;
+  tracked_at?: string;
+  updated_at?: string;
 }
 
 type DashboardSubTab = "live_overview" | "proposals" | "saved_jobs" | "statistics";
@@ -202,6 +223,23 @@ export default function DashboardPage() {
   const [generatedProposal, setGeneratedProposal] = useState("");
   const [proposalCopied, setProposalCopied] = useState(false);
 
+  // Tracker Items State (CRM Proposals & Saved)
+  const [trackerItems, setTrackerItems] = useState<TrackedItem[]>([]);
+  const [copiedProposalId, setCopiedProposalId] = useState<string | null>(null);
+
+  const handleCopyItemProposal = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedProposalId(id);
+    setTimeout(() => setCopiedProposalId(null), 2500);
+  };
+
+  const getLeadAction = (lead: Lead): TrackedProjectAction | undefined => {
+    if (lead.project_id && trackedActions[lead.project_id]) {
+      return trackedActions[lead.project_id];
+    }
+    return trackedActions[lead.id];
+  };
+
   // User Profile
   const [userCredits, setUserCredits] = useState<number>(25);
 
@@ -210,11 +248,15 @@ export default function DashboardPage() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // 1. Fetch leads from database
+  // Loading states
+  const [leadsLoading, setLeadsLoading] = useState(true);
+  const [trackerLoading, setTrackerLoading] = useState(true);
+
+  // 1. Fetch leads from database (optimized limit for rapid loading)
   async function fetchLeads(isSilent = false) {
-    if (!isSilent) setLoading(true);
+    if (!isSilent) setLeadsLoading(true);
     try {
-      const res = await fetch("/api/leads?limit=300&sort_by=newest");
+      const res = await fetch("/api/leads?limit=60&sort_by=newest");
       const data = await res.json();
       if (data.ok && Array.isArray(data.leads)) {
         setLeads(data.leads);
@@ -223,16 +265,18 @@ export default function DashboardPage() {
     } catch (err) {
       console.error("Error fetching leads:", err);
     } finally {
-      if (!isSilent) setLoading(false);
+      if (!isSilent) setLeadsLoading(false);
     }
   }
 
   // 2. Fetch user project actions (CRM) from Supabase
   async function fetchActions() {
+    setTrackerLoading(true);
     try {
       const res = await fetch("/api/tracker");
       const data = await res.json();
       if (data.ok && Array.isArray(data.items)) {
+        setTrackerItems(data.items);
         const map: Record<string, TrackedProjectAction> = {};
         data.items.forEach((item: any) => {
           map[item.project_id] = {
@@ -242,11 +286,14 @@ export default function DashboardPage() {
             generated_proposal: item.generated_proposal,
             notes: item.notes,
           };
+          map[item.id] = map[item.project_id];
         });
         setTrackedActions(map);
       }
     } catch (err) {
       console.error("Error loading CRM actions:", err);
+    } finally {
+      setTrackerLoading(false);
     }
   }
 
@@ -310,16 +357,18 @@ export default function DashboardPage() {
 
   // Handle Save / Bookmark Lead
   const handleToggleSaveLead = async (lead: Lead) => {
-    const currentAction = trackedActions[lead.id];
+    const targetId = lead.project_id || lead.id;
+    const currentAction = getLeadAction(lead);
     const newStatus = currentAction?.status === "saved" ? "ignored" : "saved";
 
     // Optimistic update
     setTrackedActions((prev) => ({
       ...prev,
-      [lead.id]: {
-        id: currentAction?.id || lead.id,
-        project_id: lead.id,
+      [targetId]: {
+        id: currentAction?.id || targetId,
+        project_id: targetId,
         status: newStatus as any,
+        notes: newStatus === "saved" ? "user_saved" : undefined,
       },
     }));
 
@@ -328,8 +377,9 @@ export default function DashboardPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          project_id: lead.id,
+          project_id: targetId,
           status: newStatus,
+          notes: newStatus === "saved" ? "user_saved" : null,
         }),
       });
 
@@ -339,40 +389,48 @@ export default function DashboardPage() {
             ? "تم حفظ المشروع في قائمة المشاريع المحفوظة بنجاح"
             : "تمت إزالة المشروع من المحفوظات"
         );
+        fetchActions();
       }
     } catch (e) {
       fetchActions();
     }
   };
 
-  // Handle Change Project Status (Applied, Won, etc.)
+  // Handle Change Project Status (Applied, Replied, Won, etc.)
   const handleChangeStatus = async (
-    leadId: string,
-    newStatus: "saved" | "applied" | "replied" | "won" | "ignored"
+    targetId: string,
+    newStatus: "matched" | "saved" | "applied" | "replied" | "won" | "ignored"
   ) => {
     setTrackedActions((prev) => ({
       ...prev,
-      [leadId]: {
-        ...(prev[leadId] || { id: leadId, project_id: leadId }),
-        status: newStatus,
+      [targetId]: {
+        ...(prev[targetId] || { id: targetId, project_id: targetId }),
+        status: newStatus as any,
       },
     }));
+
+    setTrackerItems((prev) =>
+      prev.map((item) =>
+        item.project_id === targetId || item.id === targetId ? { ...item, status: newStatus } : item
+      )
+    );
 
     try {
       await fetch("/api/tracker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: leadId, status: newStatus }),
+        body: JSON.stringify({ project_id: targetId, status: newStatus }),
       });
-      const statusLabel =
-        newStatus === "saved"
-          ? "محفوظ"
-          : newStatus === "applied"
-          ? "تم التقديم"
-          : newStatus === "won"
-          ? "تم الفوز"
-          : "مستبعد";
-      showToast(`تم تحديث حالة المشروع إلى: ${statusLabel}`);
+      const statusLabels: Record<string, string> = {
+        matched: "مسودة / مطابق",
+        saved: "محفوظ",
+        applied: "تم التقديم",
+        replied: "العميل رد 💬",
+        won: "تم الفوز 🎉",
+        ignored: "مستبعد",
+      };
+      showToast(`تم تحديث حالة المشروع إلى: ${statusLabels[newStatus] || newStatus}`);
+      fetchActions();
     } catch (e) {
       fetchActions();
     }
@@ -391,6 +449,7 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           lead_id: lead.id,
+          project_id: lead.project_id,
           project_title: extractTitleFromPostText(lead.post_text) || "مشروع عمل حر",
           project_description: extractDetailsFromPostText(lead.post_text),
         }),
@@ -402,17 +461,19 @@ export default function DashboardPage() {
         if (typeof data.remaining_credits === "number") {
           setUserCredits(data.remaining_credits);
         }
-        // Update status in CRM as applied
+        const targetId = lead.project_id || lead.id;
+        // Do NOT force status to applied! Preserve draft/saved status
         setTrackedActions((prev) => ({
           ...prev,
-          [lead.id]: {
-            id: data.action_id || lead.id,
-            project_id: lead.id,
-            status: "applied",
+          [targetId]: {
+            id: data.action_id || targetId,
+            project_id: targetId,
+            status: data.status || prev[targetId]?.status || "saved",
             generated_proposal: data.proposal,
           },
         }));
-        showToast("تم توليد العرض الذكي وحفظ حالة التقديم في Supabase!");
+        showToast("تم توليد العرض الذكي وحفظ المسودة بنجاح!");
+        fetchActions();
       } else {
         setGeneratedProposal("⚠️ تعذر توليد العرض: " + (data.error || "يرجى مراجعة الرصيد"));
       }
@@ -433,23 +494,29 @@ export default function DashboardPage() {
 
   // Export CSV Functionality (with UTF-8 BOM for Arabic)
   const handleExportCSV = () => {
-    const listToExport = filteredLeads;
+    const listToExport =
+      currentTab === "proposals"
+        ? filteredProposals
+        : currentTab === "saved_jobs"
+        ? filteredSavedJobs
+        : filteredLiveLeads;
+
     if (listToExport.length === 0) {
       alert("لا توجد مشاريع لتصديرها في التصفية الحالية.");
       return;
     }
 
     const headers = ["المنصة", "عنوان المشروع", "الميزانية", "تاريخ النشر", "رابط المشروع", "الحالة"];
-    const rows = listToExport.map((l) => {
-      const firstLine = extractTitleFromPostText(l.post_text).replace(/"/g, '""');
-      const budget = extractBudgetBadge(l.post_text) || "";
-      const status = trackedActions[l.id]?.status || "new";
+    const rows = listToExport.map((item: any) => {
+      const title = (item.title || extractTitleFromPostText(item.post_text || "")).replace(/"/g, '""');
+      const budget = item.budget || extractBudgetBadge(item.post_text || "") || "";
+      const status = item.status || getLeadAction(item)?.status || "new";
       return [
-        `"${l.platform}"`,
-        `"${firstLine}"`,
+        `"${item.platform}"`,
+        `"${title}"`,
         `"${budget}"`,
-        `"${l.published_at}"`,
-        `"${l.post_url}"`,
+        `"${item.published_at || item.created_at || ""}"`,
+        `"${item.url || item.post_url || ""}"`,
         `"${status}"`,
       ].join(",");
     });
@@ -469,50 +536,63 @@ export default function DashboardPage() {
     showToast("تم تصدير ملف CSV بنجاح!");
   };
 
-  // Filtered Leads based on current sub-tab, search, platform, and status
-  const filteredLeads = leads.filter((lead) => {
-    const action = trackedActions[lead.id];
+  // Filtered Leads from live radar feed
+  const filteredLiveLeads = leads.filter((lead) => {
+    const action = getLeadAction(lead);
 
-    // Sub-tab filtering
-    if (currentTab === "proposals") {
-      if (!action?.generated_proposal && action?.status !== "applied") return false;
-    } else if (currentTab === "saved_jobs") {
-      if (action?.status !== "saved") return false;
+    if (statusFilter !== "all" && action?.status !== statusFilter) {
+      return false;
     }
-
-    // Status filter
-    if (statusFilter !== "all") {
-      if (action?.status !== statusFilter) return false;
-    }
-
-    // Search query
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       if (!lead.post_text.toLowerCase().includes(q)) return false;
     }
-
-    // Platform filter
     if (selectedPlatform !== "all" && lead.platform !== selectedPlatform) {
       return false;
     }
-
-    // Category filter
     if (selectedCategory !== "all" && !isCategoryMatch(lead.category_slug, selectedCategory)) {
       return false;
     }
-
-    // High intent filter
     if (onlyHighIntent && (lead.intent_score || 0) < 8) {
       return false;
     }
-
     return true;
   });
 
-  // Calculate quick stats
+  // Filtered Proposals (from CRM tracker items)
+  const filteredProposals = trackerItems.filter((item) => {
+    // Only proposals that were applied/replied/won OR have a generated_proposal
+    if (!item.generated_proposal && !["applied", "replied", "won"].includes(item.status)) return false;
+
+    if (statusFilter !== "all" && item.status !== statusFilter) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchTitle = item.title?.toLowerCase().includes(q);
+      const matchDesc = item.description?.toLowerCase().includes(q);
+      const matchProp = item.generated_proposal?.toLowerCase().includes(q);
+      if (!matchTitle && !matchDesc && !matchProp) return false;
+    }
+    if (selectedPlatform !== "all" && item.platform !== selectedPlatform) return false;
+    if (selectedCategory !== "all" && !isCategoryMatch(item.category, selectedCategory)) return false;
+    return true;
+  });
+
+  // Filtered Saved Jobs (from CRM tracker items)
+  const filteredSavedJobs = trackerItems.filter((item) => {
+    if (item.status !== "saved") return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      if (!item.title?.toLowerCase().includes(q) && !item.description?.toLowerCase().includes(q)) return false;
+    }
+    if (selectedPlatform !== "all" && item.platform !== selectedPlatform) return false;
+    if (selectedCategory !== "all" && !isCategoryMatch(item.category, selectedCategory)) return false;
+    return true;
+  });
+
+  // Calculate quick stats from live data
   const totalLeads = leads.length;
-  const savedCount = Object.values(trackedActions).filter((a) => a.status === "saved").length;
-  const appliedCount = Object.values(trackedActions).filter((a) => a.status === "applied").length;
+  const savedCount = trackerItems.filter((a) => a.status === "saved").length;
+  const appliedCount = trackerItems.filter((a) => ["applied", "replied", "won"].includes(a.status)).length;
 
   return (
     <div className="space-y-6">
@@ -695,138 +775,331 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Leads Cards Feed */}
-          {loading ? (
+          {/* Cards Feed */}
+          {(currentTab === "live_overview" ? leadsLoading : trackerLoading) ? (
             <div className="vollna-card p-12 text-center bg-white border border-slate-200 rounded-2xl">
               <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-xs text-slate-500">جاري تحميل أحدث المشاريع من Supabase...</p>
+              <p className="text-xs text-slate-500">جاري تحميل البيانات من Supabase...</p>
             </div>
-          ) : filteredLeads.length === 0 ? (
-            <div className="vollna-card p-12 text-center bg-white border border-slate-200 rounded-2xl">
-              <p className="text-sm font-bold text-slate-700">لا توجد مشاريع تطابق هذه التصفية حالياً.</p>
-              <p className="text-xs text-slate-400 mt-1">جرّب اختيار "كافة المنصات" أو إزالة شروط البحث.</p>
-            </div>
-          ) : (
-            <div className="space-y-3.5">
-              {filteredLeads.map((lead) => {
-                const dateInfo = formatLeadDate(lead.published_at);
-                const budgetBadge = extractBudgetBadge(lead.post_text);
-                const firstLine = extractTitleFromPostText(lead.post_text);
-                const action = trackedActions[lead.id];
-                const isSaved = action?.status === "saved";
-                const isApplied = action?.status === "applied";
+          ) : currentTab === "proposals" || currentTab === "saved_jobs" ? (
+            /* Proposals or Saved Jobs list from CRM Tracker */
+            (currentTab === "proposals" ? filteredProposals : filteredSavedJobs).length === 0 ? (
+              <div className="vollna-card p-12 text-center bg-white border border-slate-200 rounded-2xl">
+                <p className="text-sm font-bold text-slate-700">
+                  {currentTab === "proposals"
+                    ? "لا توجد عروض مقدمة تطابق هذه التصفية حالياً."
+                    : "لا توجد مشاريع محفوظة حالياً."}
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  {currentTab === "proposals"
+                    ? "يمكنك توليد عرض ذكي لأي مشروع من الرادار وسيقوم النظام بحفظه هنا تلقائياً."
+                    : "اضغط على أيقونة الإشارة المرجعية (حفظ) لأي مشروع في الرادار ليظهر هنا فوراً."}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {(currentTab === "proposals" ? filteredProposals : filteredSavedJobs).map((item) => {
+                  const dateInfo = formatLeadDate(item.published_at || item.tracked_at || "");
+                  const theme = getPlatformTheme(item.platform);
+                  return (
+                    <div
+                      key={item.id}
+                      className={`relative overflow-hidden bg-white border rounded-2xl shadow-xs transition-all duration-200 ${theme.cardBorder} ${theme.cardHoverBorder} hover:shadow-lg ${theme.cardGlow}`}
+                    >
+                      {/* Top Brand Accent Stripe */}
+                      <div className={`h-1.5 w-full bg-gradient-to-r ${theme.topStripeGradient}`} />
 
-                return (
-                  <div
-                    key={lead.id}
-                    className="vollna-card p-5 sm:p-6 bg-white border border-slate-200 rounded-2xl shadow-xs hover:border-slate-300 transition"
-                  >
-                    {/* Top Row: Platform, Time, Budget, and Save Icon */}
-                    <div className="flex items-center justify-between gap-3 mb-2.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-slate-900 text-emerald-400 uppercase tracking-wide">
-                          {lead.platform}
-                        </span>
+                      <div className="p-5 sm:p-6">
+                        {/* Top Row: Platform Badge with Logo, Budget, Date, and Status Badge */}
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <PlatformBadge platform={item.platform} />
 
-                        {budgetBadge && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60">
-                            <bdi dir="ltr">{budgetBadge}</bdi>
-                            {lead.pricing?.budgetEgpText && (
-                              <span className="font-semibold text-emerald-700/80"> · {lead.pricing.budgetEgpText}</span>
+                            {item.budget && (
+                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60 font-mono">
+                                <bdi dir="ltr">{item.budget}</bdi>
+                              </span>
                             )}
-                          </span>
+
+                            <span className="text-[11px] text-slate-400 flex items-center gap-1" title={dateInfo.exact}>
+                              <Clock className="w-3 h-3" />
+                              <span>{dateInfo.relative}</span>
+                            </span>
+
+                            {item.status === "applied" && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200/60">
+                                ✓ تم التقديم
+                              </span>
+                            )}
+                            {item.status === "replied" && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                                💬 العميل رد
+                              </span>
+                            )}
+                            {item.status === "won" && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/60">
+                                🎉 تم الفوز
+                              </span>
+                            )}
+                            {item.status === "saved" && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                                📌 محفوظ
+                              </span>
+                            )}
+                            {item.status === "matched" && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200/60">
+                                ⚡ مسودة عرض
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Title */}
+                        <h2 className="text-base font-bold text-slate-900 mb-2 leading-snug">
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`transition-colors duration-150 ${theme.titleHover}`}
+                          >
+                            {item.title || "مشروع عمل حر"}
+                          </a>
+                        </h2>
+
+                        {/* Description Snippet */}
+                        {item.description && (
+                          <p className="text-xs text-slate-600 leading-relaxed line-clamp-2 mb-3 whitespace-pre-line">
+                            {item.description}
+                          </p>
                         )}
 
-                        <span className="text-[11px] text-slate-400 flex items-center gap-1" title={dateInfo.exact}>
-                          <Clock className="w-3 h-3" />
-                          <span>{dateInfo.relative}</span>
-                        </span>
-
-                        {isApplied && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200/60">
-                            ✓ تم التقديم
-                          </span>
+                        {/* Generated Proposal Accordion / Box */}
+                        {item.generated_proposal && (
+                          <div className="my-3.5 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                            <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-slate-200/60">
+                              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                                <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>العرض الذكي المُولد بالذكاء الاصطناعي</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyItemProposal(item.id, item.generated_proposal!)}
+                                className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-[11px] flex items-center gap-1 transition shadow-2xs"
+                              >
+                                {copiedProposalId === item.id ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-600" />
+                                    <span className="text-emerald-700">تم النسخ!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3 text-slate-500" />
+                                    <span>نسخ نص العرض</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <p className="text-xs text-slate-800 font-sans leading-relaxed whitespace-pre-line">
+                              {item.generated_proposal}
+                            </p>
+                          </div>
                         )}
-                      </div>
 
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleSaveLead(lead)}
-                          title={isSaved ? "إلغاء الحفظ" : "حفظ المشروع"}
-                          className={`p-1.5 rounded-lg border transition ${
-                            isSaved
-                              ? "bg-amber-50 border-amber-200 text-amber-600"
-                              : "border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-50"
-                          }`}
-                        >
-                          {isSaved ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
-                        </button>
-                      </div>
-                    </div>
+                        {/* Bottom Actions Row */}
+                        <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className={`py-2 px-3.5 rounded-xl border font-bold text-xs flex items-center gap-1.5 transition shadow-2xs ${theme.openBtnClass}`}
+                            >
+                              <PlatformLogo platform={theme.id} size={14} className="shrink-0" />
+                              <span>فتح المشروع في {theme.nameAr}</span>
+                              <ExternalLink className="w-3 h-3 opacity-60" />
+                            </a>
 
-                    {/* Project Title */}
-                    <h2 className="text-base font-bold text-slate-900 mb-2 leading-snug">
-                      <a
-                        href={lead.post_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="hover:text-emerald-700 transition"
-                      >
-                        {firstLine || "مشروع عمل حر جديد"}
-                      </a>
-                    </h2>
+                            {item.status !== "applied" && item.status !== "won" && item.status !== "replied" && (
+                              <button
+                                type="button"
+                                onClick={() => handleChangeStatus(item.project_id, "applied")}
+                                className="py-2 px-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-xs"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>قدّمت بالفعل على المنصة ✓</span>
+                              </button>
+                            )}
+                          </div>
 
-                    <InsightChips insights={lead.insights} pricing={lead.pricing} />
-
-                    {/* Project Description Snippet */}
-                    <p className="text-xs text-slate-600 leading-relaxed line-clamp-3 mb-4 whitespace-pre-line">
-                      {extractDetailsFromPostText(lead.post_text)}
-                    </p>
-
-                    {/* Bottom Actions Row */}
-                    <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenProposalModal(lead)}
-                          className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition"
-                        >
-                          <Sparkles className="w-3.5 h-3.5" />
-                          <span>توليد عرض ذكي</span>
-                        </button>
-
-                        <a
-                          href={lead.post_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="py-2 px-3.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition"
-                        >
-                          <span>فتح المشروع بالمنصة</span>
-                          <ExternalLink className="w-3 h-3 text-slate-400" />
-                        </a>
-                      </div>
-
-                      {/* Status Selector */}
-                      <div className="flex items-center gap-1 self-end sm:self-auto text-xs">
-                        <span className="text-[11px] text-slate-400">الحالة:</span>
-                        <select
-                          value={action?.status || "new"}
-                          onChange={(e) => handleChangeStatus(lead.id, e.target.value as any)}
-                          className="px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 font-semibold focus:outline-none focus:border-emerald-600"
-                        >
-                          <option value="new">جديد</option>
-                          <option value="saved">محفوظ</option>
-                          <option value="applied">تم التقديم</option>
-                          <option value="replied">العميل رد 💬</option>
-                          <option value="won">تم الفوز 🎉</option>
-                        </select>
+                          {/* Status Selector Dropdown */}
+                          <div className="flex items-center gap-1 self-end sm:self-auto text-xs">
+                            <span className="text-[11px] text-slate-400">الحالة:</span>
+                            <select
+                              value={item.status}
+                              onChange={(e) => handleChangeStatus(item.project_id, e.target.value as any)}
+                              className="px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 font-semibold focus:outline-none focus:border-emerald-600"
+                            >
+                              <option value="matched">مسودة / مطابق</option>
+                              <option value="saved">محفوظ 📌</option>
+                              <option value="applied">تم التقديم ✓</option>
+                              <option value="replied">العميل رد 💬</option>
+                              <option value="won">تم الفوز 🎉</option>
+                              <option value="ignored">مستبعد ✕</option>
+                            </select>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )
+          ) : (
+            /* Live Overview Cards Feed (Filtered Leads) */
+            filteredLiveLeads.length === 0 ? (
+              <div className="vollna-card p-12 text-center bg-white border border-slate-200 rounded-2xl">
+                <p className="text-sm font-bold text-slate-700">لا توجد مشاريع تطابق هذه التصفية حالياً.</p>
+                <p className="text-xs text-slate-400 mt-1">جرّب اختيار "كافة المنصات" أو إزالة شروط البحث.</p>
+              </div>
+            ) : (
+              <div className="space-y-3.5">
+                {filteredLiveLeads.map((lead) => {
+                  const dateInfo = formatLeadDate(lead.published_at);
+                  const budgetBadge = extractBudgetBadge(lead.post_text);
+                  const firstLine = extractTitleFromPostText(lead.post_text);
+                  const action = getLeadAction(lead);
+                  const isSaved = action?.status === "saved";
+                  const isApplied = action?.status === "applied";
+                  const targetId = lead.project_id || lead.id;
+                  const theme = getPlatformTheme(lead.platform);
+
+                  return (
+                    <div
+                      key={lead.id}
+                      className={`relative overflow-hidden bg-white border rounded-2xl shadow-xs transition-all duration-200 ${theme.cardBorder} ${theme.cardHoverBorder} hover:shadow-lg ${theme.cardGlow}`}
+                    >
+                      {/* Top Brand Accent Stripe */}
+                      <div className={`h-1.5 w-full bg-gradient-to-r ${theme.topStripeGradient}`} />
+
+                      <div className="p-5 sm:p-6">
+                        {/* Top Row: Platform Badge with Logo, Time, Budget, and Save Icon */}
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <PlatformBadge platform={lead.platform} />
+
+                            {budgetBadge && (
+                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60 font-mono">
+                                <bdi dir="ltr">{budgetBadge}</bdi>
+                                {lead.pricing?.budgetEgpText && (
+                                  <span className="font-semibold text-emerald-700/80"> · {lead.pricing.budgetEgpText}</span>
+                                )}
+                              </span>
+                            )}
+
+                            <span className="text-[11px] text-slate-400 flex items-center gap-1" title={dateInfo.exact}>
+                              <Clock className="w-3 h-3" />
+                              <span>{dateInfo.relative}</span>
+                            </span>
+
+                            {isApplied && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200/60">
+                                ✓ تم التقديم
+                              </span>
+                            )}
+                            {action?.status === "replied" && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                                💬 العميل رد
+                              </span>
+                            )}
+                            {action?.status === "won" && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/60">
+                                🎉 تم الفوز
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSaveLead(lead)}
+                              title={isSaved ? "إلغاء الحفظ" : "حفظ المشروع"}
+                              className={`p-1.5 rounded-lg border transition ${
+                                isSaved
+                                  ? "bg-amber-50 border-amber-200 text-amber-600"
+                                  : "border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                              }`}
+                            >
+                              {isSaved ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Project Title with platform hover color */}
+                        <h2 className="text-base font-bold text-slate-900 mb-2 leading-snug">
+                          <a
+                            href={lead.post_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`transition-colors duration-150 ${theme.titleHover} inline-flex items-center gap-1.5`}
+                          >
+                            <span>{firstLine || "مشروع عمل حر جديد"}</span>
+                          </a>
+                        </h2>
+
+                        <InsightChips insights={lead.insights} pricing={lead.pricing} />
+
+                        {/* Project Description Snippet */}
+                        <p className="text-xs text-slate-600 leading-relaxed line-clamp-3 mb-4 whitespace-pre-line">
+                          {extractDetailsFromPostText(lead.post_text)}
+                        </p>
+
+                        {/* Bottom Actions Row */}
+                        <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenProposalModal(lead)}
+                              className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition"
+                            >
+                              <Sparkles className="w-3.5 h-3.5" />
+                              <span>توليد عرض ذكي</span>
+                            </button>
+
+                            <a
+                              href={lead.post_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className={`py-2 px-3.5 rounded-xl border font-bold text-xs flex items-center gap-1.5 transition shadow-2xs ${theme.openBtnClass}`}
+                            >
+                              <PlatformLogo platform={theme.id} size={14} className="shrink-0" />
+                              <span>فتح المشروع في {theme.nameAr}</span>
+                              <ExternalLink className="w-3 h-3 opacity-60" />
+                            </a>
+                          </div>
+
+                          {/* Status Selector */}
+                          <div className="flex items-center gap-1 self-end sm:self-auto text-xs">
+                            <span className="text-[11px] text-slate-400">الحالة:</span>
+                            <select
+                              value={action?.status || "new"}
+                              onChange={(e) => handleChangeStatus(targetId, e.target.value as any)}
+                              className="px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 font-semibold focus:outline-none focus:border-emerald-600"
+                            >
+                              <option value="new">جديد</option>
+                              <option value="saved">محفوظ</option>
+                              <option value="applied">تم التقديم</option>
+                              <option value="replied">العميل رد 💬</option>
+                              <option value="won">تم الفوز 🎉</option>
+                              <option value="ignored">مستبعد</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )
           )}
         </div>
       )}
@@ -871,18 +1144,18 @@ export default function DashboardPage() {
                   {generatedProposal}
                 </div>
 
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100">
                   <span className="text-[11px] text-slate-400">
-                    تم حفظ حالة المشروع تلقائياً كـ تم التقديم في المتابعة
+                    العرض محفوظ كمسودة. اضغط "قدّمت بالفعل" بعد إرساله على المنصة.
                   </span>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button
                       type="button"
                       onClick={handleCopyProposal}
-                      className="py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition"
+                      className="py-2 px-3.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition shadow-2xs"
                     >
-                      {proposalCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      {proposalCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                       <span>{proposalCopied ? "تم النسخ!" : "نسخ نص العرض"}</span>
                     </button>
 
@@ -890,11 +1163,26 @@ export default function DashboardPage() {
                       href={proposalModalLead.post_url}
                       target="_blank"
                       rel="noreferrer"
-                      className="py-2 px-4 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition"
+                      className="py-2 px-3.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition"
                     >
-                      <span>الانتقال لتقديم العرض</span>
+                      <span>الانتقال للمنصة</span>
                       <ExternalLink className="w-3 h-3 text-slate-400" />
                     </a>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!proposalModalLead) return;
+                        const targetId = proposalModalLead.project_id || proposalModalLead.id;
+                        await handleChangeStatus(targetId, "applied");
+                        showToast("🎉 تم تسجيل التقديم بنجاح في متتبع العروض!");
+                        setProposalModalLead(null);
+                      }}
+                      className="py-2 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>قدّمت بالفعل على المنصة ✓</span>
+                    </button>
                   </div>
                 </div>
               </div>

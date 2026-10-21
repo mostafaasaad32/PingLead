@@ -48,6 +48,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/filters") ||
     pathname.startsWith("/templates") ||
     pathname.startsWith("/portfolio") ||
+    pathname.startsWith("/profile-audit") ||
     pathname.startsWith("/insights") ||
     pathname.startsWith("/tracker") ||
     pathname.startsWith("/settings") ||

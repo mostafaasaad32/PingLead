@@ -49,6 +49,7 @@ import {
   CategoryMetadata,
   isJobBoard,
 } from "@/lib/scrapers/types";
+import { PlatformLogo } from "@/lib/platform-themes";
 import { isCategoryMatch } from "@/lib/filters/categorizer";
 import { COUNTRY_OPTIONS, GULF_COUNTRY_CODES, countryCodeFor } from "@/lib/filters/countries";
 
@@ -1243,11 +1244,7 @@ export default function JobFiltersWorkspace() {
                             onChange={() => togglePlatform(plat.id)}
                             className="sr-only"
                           />
-                          <span
-                            className={`w-4.5 h-4.5 rounded flex items-center justify-center text-[9px] font-bold shrink-0 ${plat.badge_color} ${plat.text_color}`}
-                          >
-                            {plat.icon_letter}
-                          </span>
+                          <PlatformLogo platform={plat.id} size={18} className="shrink-0" />
                           <span className="truncate">{plat.label_ar.split(" ")[0]}</span>
                         </label>
                       );
@@ -1278,11 +1275,7 @@ export default function JobFiltersWorkspace() {
                             onChange={() => togglePlatform(plat.id)}
                             className="sr-only"
                           />
-                          <span
-                            className={`w-4.5 h-4.5 rounded flex items-center justify-center text-[9px] font-bold shrink-0 ${plat.badge_color} ${plat.text_color}`}
-                          >
-                            {plat.icon_letter}
-                          </span>
+                          <PlatformLogo platform={plat.id} size={18} className="shrink-0" />
                           <span className="truncate">{plat.label_en}</span>
                         </label>
                       );

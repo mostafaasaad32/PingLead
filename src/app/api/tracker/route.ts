@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
         status,
         generated_proposal,
         notes,
+        matched_filter_id,
         created_at,
         updated_at,
         projects (
@@ -58,23 +59,37 @@ export async function GET(req: NextRequest) {
     const { data, error } = await query;
     if (error) throw error;
 
-    const trackedItems = (data || []).map((item: any) => ({
-      id: item.id,
-      project_id: item.project_id,
-      status: item.status,
-      generated_proposal: item.generated_proposal,
-      notes: item.notes,
-      title: item.projects?.title || "مشروع عمل حر",
-      description: item.projects?.description || "",
-      url: item.projects?.url || "",
-      platform: item.projects?.platform || "mostaql",
-      category: item.projects?.category || "web_dev",
-      budget: item.projects?.budget || null,
-      budget_usd_estimate: item.projects?.budget_usd_estimate || null,
-      published_at: item.projects?.published_at || item.created_at,
-      tracked_at: item.created_at,
-      updated_at: item.updated_at,
-    }));
+    const trackedItems = (data || []).map((item: any) => {
+      // If item was auto-created by ingestion filter match and hasn't been explicitly bookmarked
+      let effectiveStatus = item.status;
+      if (
+        effectiveStatus === "saved" &&
+        item.matched_filter_id &&
+        item.notes !== "user_saved" &&
+        !item.generated_proposal
+      ) {
+        effectiveStatus = "matched";
+      }
+
+      return {
+        id: item.id,
+        project_id: item.project_id,
+        status: effectiveStatus,
+        generated_proposal: item.generated_proposal,
+        notes: item.notes,
+        matched_filter_id: item.matched_filter_id,
+        title: item.projects?.title || "مشروع عمل حر",
+        description: item.projects?.description || "",
+        url: item.projects?.url || "",
+        platform: item.projects?.platform || "mostaql",
+        category: item.projects?.category || "web_dev",
+        budget: item.projects?.budget || null,
+        budget_usd_estimate: item.projects?.budget_usd_estimate || null,
+        published_at: item.projects?.published_at || item.created_at,
+        tracked_at: item.created_at,
+        updated_at: item.updated_at,
+      };
+    });
 
     // Calculate real CRM metrics
     const totalCount = trackedItems.length;
@@ -83,6 +98,7 @@ export async function GET(req: NextRequest) {
     const repliedCount = trackedItems.filter((i) => ["replied", "won"].includes(i.status)).length;
     const wonCount = trackedItems.filter((i) => i.status === "won").length;
     const savedCount = trackedItems.filter((i) => i.status === "saved").length;
+    const matchedCount = trackedItems.filter((i) => i.status === "matched").length;
     const proposalsCount = trackedItems.filter((i) => Boolean(i.generated_proposal)).length;
 
     return NextResponse.json({
@@ -90,6 +106,7 @@ export async function GET(req: NextRequest) {
       items: trackedItems,
       metrics: {
         total: totalCount,
+        matched: matchedCount,
         applied: appliedCount,
         replied: repliedCount,
         won: wonCount,
@@ -137,8 +154,11 @@ export async function POST(req: NextRequest) {
       updated_at: new Date().toISOString(),
     };
 
-    if (generated_proposal !== undefined) payload.generated_proposal = generated_proposal;
-    if (notes !== undefined) payload.notes = notes;
+    if (targetStatus === "saved" && notes === undefined) {
+      payload.notes = "user_saved";
+    } else if (notes !== undefined) {
+      payload.notes = notes;
+    }
 
     const { data: action, error } = await supabase
       .from("user_project_actions")
@@ -176,7 +196,12 @@ export async function PATCH(req: NextRequest) {
       updated_at: new Date().toISOString(),
     };
 
-    if (status !== undefined) updates.status = status;
+    if (status !== undefined) {
+      updates.status = status;
+      if (status === "saved" && notes === undefined) {
+        updates.notes = "user_saved";
+      }
+    }
     if (generated_proposal !== undefined) updates.generated_proposal = generated_proposal;
     if (notes !== undefined) updates.notes = notes;
 

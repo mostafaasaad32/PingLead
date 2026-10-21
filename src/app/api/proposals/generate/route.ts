@@ -124,11 +124,17 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (profile) {
-      effectiveBio = effectiveBio || profile.bio || profile.title || '';
-      effectiveSkills = effectiveSkills || profile.skills || '';
-      effectiveTone = effectiveTone || profile.tone_of_voice || 'confident';
+      const isEnglishJob = /^[A-Za-z]/.test(title || "") || platform === "freelancer" || platform === "upwork";
+      const persona = isEnglishJob ? (profile as any).persona_en : (profile as any).persona_ar;
+      if (persona?.bio) {
+        effectiveBio = effectiveBio || persona.bio;
+      } else {
+        effectiveBio = effectiveBio || profile.bio || profile.title || "";
+      }
+      effectiveSkills = effectiveSkills || profile.skills || "";
+      effectiveTone = effectiveTone || profile.tone_of_voice || "confident";
     }
-    effectiveTone = effectiveTone || 'confident';
+    effectiveTone = effectiveTone || "confident";
 
     // 3. Fetch Portfolio Items
     let portfolioItems: PortfolioItem[] = [];
@@ -182,27 +188,39 @@ export async function POST(req: NextRequest) {
       throw err;
     }
 
-    // 5. Save Proposal to user_project_actions (Mini-CRM)
+    // 5. Save Proposal to user_project_actions (Mini-CRM) without forcing 'applied'
     let savedActionId: string | null = null;
+    let effectiveStatus = 'saved';
     if (effectiveUserId && targetProjectId) {
       try {
+        const { data: existing } = await (supabaseAdmin
+          .from('user_project_actions') as any)
+          .select('id, status')
+          .eq('user_id', effectiveUserId)
+          .eq('project_id', targetProjectId)
+          .maybeSingle();
+
+        // Preserve existing status if present (e.g. applied, replied, won, saved), don't force 'applied'
+        effectiveStatus = existing?.status || 'saved';
+
         const { data: action, error: actionErr } = await (supabaseAdmin
           .from('user_project_actions') as any)
           .upsert(
             {
               user_id: effectiveUserId,
               project_id: targetProjectId,
-              status: 'applied',
+              status: effectiveStatus,
               generated_proposal: result.proposal,
               updated_at: new Date().toISOString(),
             },
             { onConflict: 'user_id,project_id' }
           )
-          .select('id')
+          .select('id, status')
           .single();
 
         if (!actionErr && action) {
           savedActionId = action.id;
+          effectiveStatus = action.status;
         }
       } catch (err: any) {
         console.warn('[AI Proposal Generator] Could not upsert user_project_actions:', err.message);
