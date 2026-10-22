@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
       // A project is ONLY 'saved' if the user explicitly clicked save (notes === 'user_saved')
       let effectiveStatus = item.status;
       if (effectiveStatus === "saved" && item.notes !== "user_saved") {
-        effectiveStatus = "ignored";
+        effectiveStatus = "matched";
       }
 
       return {

@@ -190,7 +190,7 @@ export async function POST(req: NextRequest) {
 
     // 5. Save Proposal to user_project_actions without falsely marking it as 'saved'
     let savedActionId: string | null = null;
-    let effectiveStatus = 'ignored';
+    let effectiveStatus = 'matched';
     if (effectiveUserId && targetProjectId) {
       try {
         const { data: existing } = await (supabaseAdmin
@@ -201,7 +201,9 @@ export async function POST(req: NextRequest) {
           .maybeSingle();
 
         // Only keep 'saved' if the project was explicitly bookmarked by the user (notes = 'user_saved')
-        effectiveStatus = existing?.status === 'saved' && existing?.notes === 'user_saved' ? 'saved' : (existing?.status || 'ignored');
+        // ...and an old auto-matched 'saved' row (no user_saved note) becomes 'matched'
+        effectiveStatus =
+          existing?.status === 'saved' ? (existing.notes === 'user_saved' ? 'saved' : 'matched') : (existing?.status || 'matched');
 
         const { data: action, error: actionErr } = await (supabaseAdmin
           .from('user_project_actions') as any)

@@ -2,8 +2,9 @@
 // src/app/api/cron/cleanup/route.ts
 // Database Auto-Cleanup Endpoint: Removes projects > 72 hours (3 days)
 // Preserves:
-// - Bookmarked / Saved projects (status = 'saved' & notes = 'user_saved')
-// - Projects with generated AI proposals (generated_proposal IS NOT NULL)
+// - Any project a user saved, applied to, got a reply on or won
+// - Projects with generated AI proposals or in the auto-bidding queue
+// (see src/lib/cleanup/retention.ts; hours below 24 are raised to 24)
 // ==============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -24,12 +25,11 @@ async function handleCleanup(req: NextRequest) {
     const authHeader = req.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
     const url = new URL(req.url);
-    const urlSecret = url.searchParams.get('secret');
 
-    // Allow execution if authorized via secret or if running in development
+    // Bearer header only (same as /api/cron/ingest): secrets in query strings end up in access logs
     const isAuthorized =
       process.env.NODE_ENV === 'development' ||
-      (cronSecret && (authHeader === `Bearer ${cronSecret}` || urlSecret === cronSecret));
+      (cronSecret && authHeader === `Bearer ${cronSecret}`);
 
     if (!isAuthorized) {
       return NextResponse.json(

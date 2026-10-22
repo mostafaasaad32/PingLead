@@ -1,9 +1,13 @@
 // ==============================================================================
 // src/lib/cleanup/retention.ts
-// Automatic 72-Hour Project Retention Cleaner
-// Safely removes stale projects (> 72 hours by published_at or created_at) while permanently preserving:
-// 1. Projects saved/bookmarked by users (status = 'saved' & notes = 'user_saved')
-// 2. Projects with generated AI proposals (generated_proposal IS NOT NULL)
+// Automatic Project Retention Cleaner (default 72 hours)
+// Deleting a project cascades to its user_project_actions rows, so a project is only
+// removed when it is old (both published_at and created_at past the cutoff) AND nobody
+// did anything with it. A project is preserved forever if any user:
+//   - saved, applied, got a reply or won it (status saved/applied/replied/won)
+//   - generated an AI proposal for it
+//   - has it in the auto-bidding queue
+// Untouched 'matched' and 'ignored' rows don't protect a project.
 // ==============================================================================
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
@@ -18,140 +22,93 @@ export interface RetentionCleanupResult {
   error?: string;
 }
 
-/**
- * Splits an array into chunks of a given size to avoid URL length limitations
- */
+const MIN_RETENTION_HOURS = 24;
+const BATCH_SIZE = 500; // old projects examined per run
+const CHUNK_SIZE = 100; // ids per .in() filter (URL length)
+const PROTECTED_STATUSES = ['saved', 'applied', 'replied', 'won'];
+
 function chunkArray<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
   return chunks;
 }
 
 /**
- * Performs retention cleanup of projects older than retentionHours (default: 72 hours / 3 days).
- * Strictly guarantees that any saved project or project with an AI proposal is NEVER deleted.
+ * Removes up to BATCH_SIZE expired, untouched projects (oldest first) and their leads_pool rows.
  */
 export async function performProjectRetentionCleanup(
   retentionHours = 72
 ): Promise<RetentionCleanupResult> {
-  const cutoffTime = new Date(Date.now() - retentionHours * 60 * 60 * 1000).toISOString();
+  const hours = Math.max(MIN_RETENTION_HOURS, Number.isFinite(retentionHours) ? retentionHours : 72);
+  const cutoffTime = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const result: RetentionCleanupResult = {
+    ok: true,
+    retentionHours: hours,
+    cutoffTime,
+    preservedProjectCount: 0,
+    deletedProjects: 0,
+    deletedLeads: 0,
+  };
 
   try {
-    // 1. Query all preserved project IDs from user_project_actions
-    // Preserved criteria:
-    // - status = 'saved' AND notes = 'user_saved' (user explicitly clicked save)
-    // - generated_proposal IS NOT NULL (user generated an AI proposal)
-    const { data: preservedActions, error: actionErr } = await (supabaseAdmin
-      .from('user_project_actions') as any)
-      .select('project_id')
-      .or('notes.eq.user_saved,generated_proposal.not.is.null');
-
-    if (actionErr) {
-      console.error('[Retention Cleanup] Failed to fetch preserved project IDs:', actionErr.message);
-      return {
-        ok: false,
-        retentionHours,
-        cutoffTime,
-        preservedProjectCount: 0,
-        deletedProjects: 0,
-        deletedLeads: 0,
-        error: actionErr.message,
-      };
-    }
-
-    const preservedIdsSet = new Set<string>(
-      (preservedActions || [])
-        .map((a: any) => a.project_id)
-        .filter((id: any): id is string => typeof id === 'string' && id.length > 0)
-    );
-
-    // 2. Query projects older than cutoffTime in batches (checking published_at or created_at)
-    let totalDeletedProjects = 0;
-    let totalDeletedLeads = 0;
-    const fetchLimit = 200;
-
-    const { data: oldProjects, error: projErr } = await (supabaseAdmin
-      .from('projects') as any)
+    // 1. Old candidates: scraped AND published before the cutoff, so a project that is still
+    //    listed on its platform isn't deleted and re-inserted (which would re-alert users)
+    const { data: oldProjects, error: projErr } = await (supabaseAdmin.from('projects') as any)
       .select('id, platform, external_id')
-      .or(`published_at.lt.${cutoffTime},created_at.lt.${cutoffTime}`)
-      .limit(fetchLimit);
+      .lt('created_at', cutoffTime)
+      .lt('published_at', cutoffTime)
+      .order('created_at', { ascending: true })
+      .limit(BATCH_SIZE);
+    if (projErr) throw projErr;
+    if (!oldProjects?.length) return result;
 
-    if (projErr) {
-      console.error('[Retention Cleanup] Error fetching candidate projects:', projErr.message);
-      return {
-        ok: false,
-        retentionHours,
-        cutoffTime,
-        preservedProjectCount: preservedIdsSet.size,
-        deletedProjects: 0,
-        deletedLeads: 0,
-        error: projErr.message,
-      };
+    // 2. Which of these candidates did someone act on? (checked per batch, so no 1,000-row cap issue)
+    const candidateIds: string[] = oldProjects.map((p: any) => p.id);
+    const preserved = new Set<string>();
+    for (const chunk of chunkArray(candidateIds, CHUNK_SIZE)) {
+      const [actionsRes, proposalsRes, queueRes] = await Promise.all([
+        (supabaseAdmin.from('user_project_actions') as any)
+          .select('project_id')
+          .in('project_id', chunk)
+          .in('status', PROTECTED_STATUSES),
+        (supabaseAdmin.from('user_project_actions') as any)
+          .select('project_id')
+          .in('project_id', chunk)
+          .not('generated_proposal', 'is', null),
+        (supabaseAdmin.from('auto_bid_queue') as any).select('project_id').in('project_id', chunk),
+      ]);
+      // Never delete on a failed safety check
+      const failed = actionsRes.error || proposalsRes.error || queueRes.error;
+      if (failed) throw failed;
+      for (const row of [...(actionsRes.data || []), ...(proposalsRes.data || []), ...(queueRes.data || [])]) {
+        if (row.project_id) preserved.add(row.project_id);
+      }
     }
+    result.preservedProjectCount = preserved.size;
 
-    if (oldProjects && oldProjects.length > 0) {
-      // Exclude preserved projects
-      const toDelete = oldProjects.filter((p: any) => !preservedIdsSet.has(p.id));
-      const toDeleteIds = toDelete.map((p: any) => p.id);
-      const toDeleteExternalPostIds = toDelete.map(
-        (p: any) => `${p.platform}_${p.external_id}`
-      );
+    const toDelete = oldProjects.filter((p: any) => !preserved.has(p.id));
 
-      // 3. Delete matching leads from leads_pool in safe chunks
-      const leadChunks = chunkArray(toDeleteExternalPostIds, 40);
-      for (const chunk of leadChunks) {
-        const { error: leadsErr } = await (supabaseAdmin
-          .from('leads_pool') as any)
-          .delete()
-          .in('external_post_id', chunk);
+    // 3. leads_pool rows first, then the projects (cascades to their untouched actions)
+    for (const chunk of chunkArray(toDelete, CHUNK_SIZE)) {
+      const { count: leadsCount, error: leadsErr } = await (supabaseAdmin.from('leads_pool') as any)
+        .delete({ count: 'exact' })
+        .in('external_post_id', chunk.map((p: any) => `${p.platform}_${p.external_id}`));
+      if (leadsErr) console.warn('[Retention Cleanup] leads_pool delete warning:', leadsErr.message);
+      else result.deletedLeads += leadsCount || 0;
 
-        if (!leadsErr) {
-          totalDeletedLeads += chunk.length;
-        } else {
-          console.warn('[Retention Cleanup] Leads deletion chunk warning:', leadsErr.message);
-        }
-      }
-
-      // 4. Delete projects from projects table in safe chunks
-      const projectChunks = chunkArray(toDeleteIds, 40);
-      for (const chunk of projectChunks) {
-        const { error: delErr } = await (supabaseAdmin
-          .from('projects') as any)
-          .delete()
-          .in('id', chunk);
-
-        if (!delErr) {
-          totalDeletedProjects += chunk.length;
-        } else {
-          console.error('[Retention Cleanup] Projects deletion chunk error:', delErr.message);
-        }
-      }
+      const { count: projCount, error: delErr } = await (supabaseAdmin.from('projects') as any)
+        .delete({ count: 'exact' })
+        .in('id', chunk.map((p: any) => p.id));
+      if (delErr) console.error('[Retention Cleanup] projects delete error:', delErr.message);
+      else result.deletedProjects += projCount || 0;
     }
 
     console.log(
-      `[Retention Cleanup] Completed: deleted ${totalDeletedProjects} projects & ${totalDeletedLeads} leads older than ${retentionHours}h. Preserved ${preservedIdsSet.size} projects.`
+      `[Retention Cleanup] Deleted ${result.deletedProjects} projects & ${result.deletedLeads} leads older than ${hours}h; preserved ${preserved.size} acted-on projects in this batch.`
     );
-
-    return {
-      ok: true,
-      retentionHours,
-      cutoffTime,
-      preservedProjectCount: preservedIdsSet.size,
-      deletedProjects: totalDeletedProjects,
-      deletedLeads: totalDeletedLeads,
-    };
+    return result;
   } catch (err: any) {
-    console.error('[Retention Cleanup] Unexpected failure:', err);
-    return {
-      ok: false,
-      retentionHours,
-      cutoffTime,
-      preservedProjectCount: 0,
-      deletedProjects: 0,
-      deletedLeads: 0,
-      error: err.message,
-    };
+    console.error('[Retention Cleanup] Failed:', err?.message || err);
+    return { ...result, ok: false, error: err?.message || String(err) };
   }
 }

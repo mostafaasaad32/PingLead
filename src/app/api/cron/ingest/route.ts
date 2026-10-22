@@ -27,6 +27,9 @@ import { performProjectRetentionCleanup } from '@/lib/cleanup/retention';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Max execution time for serverless/Edge
 
+// Projects published longer ago than this never trigger a Telegram alert
+const ALERT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+
 /** Runs fn over items with at most `limit` in flight; results keep input order. */
 async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -253,8 +256,11 @@ export async function GET(req: NextRequest) {
 
       const alertJobs = newActions
         .map((action) => ({ action, ...matchByCandidate.get(`${action.user_id}_${action.project_id}`)! }))
-        .filter(({ match }) => {
+        .filter(({ item, match }) => {
           const filter = activeFilters.find((f) => f.id === match.filterId);
+          // A project still listed after retention cleanup deleted it comes back as "new": don't re-alert
+          const publishedAt = new Date(item.project.published_at).getTime();
+          if (publishedAt && Date.now() - publishedAt > ALERT_MAX_AGE_MS) return false;
           return filter?.notify_telegram && userTelegramMap.has(match.userId);
         });
 
@@ -333,10 +339,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Trigger automatic 72-hour database retention cleanup in background
-    performProjectRetentionCleanup(72).catch((cleanupErr) =>
-      console.warn('[Cron Ingest] Background 72h cleanup warning:', cleanupErr.message)
-    );
+    // 72-hour retention cleanup, once an hour (the cron runs every minute). Awaited: serverless
+    // functions can be frozen right after the response, killing un-awaited work.
+    if (new Date().getUTCMinutes() === 0) {
+      await performProjectRetentionCleanup(72).catch((cleanupErr) =>
+        console.warn('[Cron Ingest] 72h cleanup warning:', cleanupErr.message)
+      );
+    }
 
     const durationMs = Date.now() - startTime;
 
