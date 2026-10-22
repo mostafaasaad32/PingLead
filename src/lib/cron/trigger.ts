@@ -16,10 +16,21 @@ function internalBaseUrl(): string {
 }
 
 /**
+ * Local machines share the production database: a local ingestion cycle inserts the new
+ * matches first and alerts them through the local (test) bot, so production skips them as
+ * duplicates and the real bot never sends them. Locally, ingestion only runs when asked
+ * for with `npm run dev:ingest` (LOCAL_INGEST=1).
+ */
+export const ingestTriggersAllowed = !!process.env.VERCEL || process.env.LOCAL_INGEST === '1';
+
+/**
  * On Vercel the ingestion is driven by an external every-minute cron (cron-job.org),
  * and serverless instances don't share memory, so page-load triggers would multiply.
  */
-export const pageLoadTriggersEnabled = !process.env.VERCEL;
+export const pageLoadTriggersEnabled = !process.env.VERCEL && process.env.LOCAL_INGEST === '1';
+
+export const LOCAL_INGEST_DISABLED_MESSAGE =
+  'السحب متوقف على الجهاز عشان ميسرقش تنبيهات البوت الحقيقي. شغّل npm run dev:ingest لو محتاجه.';
 
 /**
  * Triggers one ingestion cycle. Calls within MIN_INTERVAL_MS of the previous
@@ -27,7 +38,11 @@ export const pageLoadTriggersEnabled = !process.env.VERCEL;
  */
 export async function triggerIngest(
   scrape: boolean = true
-): Promise<{ ok: boolean; skipped?: boolean; data?: any; error?: string }> {
+): Promise<{ ok: boolean; skipped?: boolean; disabled?: boolean; data?: any; error?: string }> {
+  if (!ingestTriggersAllowed) {
+    return { ok: false, disabled: true, error: LOCAL_INGEST_DISABLED_MESSAGE };
+  }
+
   if (inFlight) {
     const data = await inFlight.catch(() => null);
     return { ok: !!data?.ok, skipped: true, data };

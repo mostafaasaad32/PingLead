@@ -155,8 +155,9 @@ npm run dev
 
 That single command starts:
 - 🌐 the **website** on http://localhost:3000
-- 🔄 the **ingestion worker** (scrapes every 60 seconds, after the site is up)
 - 🤖 a **local Telegram bot bridge** (only if `TELEGRAM_BOT_TOKEN` is set). It polls Telegram and forwards updates to the local webhook, so no public URL is needed.
+
+Scraping is **off** locally by default: the local site uses the production database, so a local cycle would grab new matches first and alert them through your test bot instead of the real one. To scrape and send alerts from your machine, run `npm run dev:ingest` (adds the ingestion worker, every 30 seconds).
 
 Then sign up, open **Settings → Notifications → Connect Telegram**, and tap **Start** in the bot.
 
@@ -182,7 +183,8 @@ Then sign up, open **Settings → Notifications → Connect Telegram**, and tap 
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Site + worker + local Telegram bot |
+| `npm run dev` | Site + local Telegram bot (no scraping) |
+| `npm run dev:ingest` | Site + local Telegram bot + ingestion worker |
 | `npm run dev:web` | Site only |
 | `npm run worker` | Ingestion worker only |
 | `npm run build` / `npm start` | Production build / server |

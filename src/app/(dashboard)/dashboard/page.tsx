@@ -340,17 +340,20 @@ export default function DashboardPage() {
   const handleScanNow = async () => {
     setScanning(true);
     try {
-      const res = await fetch("/api/cron/ingest");
-      const data = await res.json();
+      // /api/scan runs the cron server-side (the browser never has CRON_SECRET)
+      const res = await fetch("/api/scan", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
       if (data.ok) {
         showToast(
-          `تم سحب الرادار بنجاح: تم جلب ${data.totalProjectsIngested || 0} مشروع جديد عبر 9 منصات.`
+          data.skipped
+            ? "الرادار لسه ساحب من أقل من دقيقة، دي أحدث المشاريع."
+            : `تم سحب الرادار بنجاح: ${data.totalProjectsIngested || 0} مشروع من كل المنصات.`
         );
         fetchLeads(false);
         fetchActions();
         setCountdown(15);
       } else {
-        showToast("اكتمل المسح دون إضافة مشاريع جديدة.");
+        showToast(data.error || "تعذر تشغيل الرادار.");
       }
     } catch (e) {
       showToast("حدث خطأ في الاتصال بالرادار.");

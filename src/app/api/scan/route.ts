@@ -29,9 +29,13 @@ export async function POST() {
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error || "تعذر تشغيل الرادار" },
-      { status: 500 }
+      { status: result.disabled ? 409 : 500 }
     );
   }
 
-  return NextResponse.json({ ok: true, skipped: !!result.skipped });
+  return NextResponse.json({
+    ok: true,
+    skipped: !!result.skipped,
+    totalProjectsIngested: result.data?.totalProjectsIngested ?? 0,
+  });
 }

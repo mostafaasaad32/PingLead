@@ -6,6 +6,7 @@
   "description": "AI Lead Radar (PingLead) - Real-time Social Intent Lead Engine",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:ingest": "node scripts/dev.mjs --ingest",
     "dev:web": "next dev",
     "build": "next build",
     "start": "next start",
