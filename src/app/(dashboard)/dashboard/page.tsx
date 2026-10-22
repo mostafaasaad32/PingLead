@@ -987,7 +987,11 @@ export default function DashboardPage() {
                               <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60 font-mono">
                                 <bdi dir="ltr">{budgetBadge}</bdi>
                                 {lead.pricing?.budgetEgpText && (
-                                  <span className="font-semibold text-emerald-700/80"> · {lead.pricing.budgetEgpText}</span>
+                                  <span className="font-semibold text-emerald-700/80">
+                                    {" · "}
+                                    {/* isolated so the RTL page doesn't flip the range to "136,000 - 54,400" */}
+                                    <bdi dir="ltr">{lead.pricing.budgetEgpText}</bdi>
+                                  </span>
                                 )}
                               </span>
                             )}
