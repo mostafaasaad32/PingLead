@@ -108,6 +108,10 @@ export interface TelegramProjectAlertData extends ProjectInsights {
   currency?: string | null;
   source_created_at?: string | null;
   pricing?: ProjectPricing | null;
+  /** AI qualifier result (filters with AI criteria) */
+  ai_score?: number | null;
+  ai_reason?: string | null;
+  ai_quota_exhausted?: boolean;
 }
 
 /**
@@ -153,10 +157,19 @@ export async function sendSmartFilterTelegramAlert(
   // Freshness right under the title: how fast the alert arrived is the point of the product
   const freshness = formatPostedAgo(project.source_created_at);
 
+  const aiLine =
+    typeof project.ai_score === 'number'
+      ? `🤖 <b>توافق مع شروطك:</b> ${project.ai_score >= 85 ? '🟢' : project.ai_score >= 70 ? '🟡' : '🔴'} ${project.ai_score}%` +
+        `${project.ai_reason ? ` · ${escapeHtml(project.ai_reason)}` : ''}\n`
+      : project.ai_quota_exhausted
+        ? `🤖 <i>رصيد تقييم الـ AI للشهر ده خلص، فالمشروع ده متقيّمش.</i>\n`
+        : '';
+
   const message =
     `🎯 <b>تنبيه فلتر ذكي: ${escapeHtml(filterName)}</b>\n\n` +
     `💼 <b>${cleanTitle}</b>\n` +
     (freshness ? `⏱️ <b>${freshness}</b>\n` : '') +
+    aiLine +
     `📍 <b>المنصة:</b> ${platformLabel}\n` +
     `💰 <b>${isJob ? 'الراتب (وظيفة)' : 'الميزانية'}:</b> ${escapeHtml(budgetInfo)}` +
     `${suggestionLine}` +

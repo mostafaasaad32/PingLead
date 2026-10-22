@@ -23,6 +23,13 @@ import { sendSmartFilterTelegramAlert, dispatchLeadToSubscribers } from '@/lib/t
 import { evaluateProjectForAutoBidding } from '@/lib/auto-bidder/engine';
 import { getProjectPricing, type ProjectPricing } from '@/lib/insights/pricing';
 import { performProjectRetentionCleanup } from '@/lib/cleanup/retention';
+import {
+  DEFAULT_AI_MIN_SCORE,
+  qualifyProjects,
+  releaseEvaluations,
+  reserveEvaluations,
+  type QualifierResult,
+} from '@/lib/ai/project-qualifier';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Max execution time for serverless/Edge
@@ -42,6 +49,78 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
   });
   await Promise.all(workers);
   return results;
+}
+
+interface QualifierJob {
+  action: { id: string; user_id: string; project_id: string };
+  item: { project: UnifiedProject };
+  match: { userId: string; filterId: string };
+}
+
+interface ActionAiResult {
+  result: QualifierResult | null;
+  quotaExhausted: boolean;
+}
+
+/**
+ * Scores this cycle's new matches whose filter has AI criteria, one Gemini batch per
+ * (filter, 10 projects), all in parallel. Saves ai_score/ai_reason on the CRM rows.
+ * Projects over the user's monthly quota, or whose AI call failed, stay unscored.
+ */
+async function qualifyNewMatches(jobs: QualifierJob[], filters: UserFilter[]): Promise<Map<string, ActionAiResult>> {
+  const out = new Map<string, ActionAiResult>();
+  const byFilter = new Map<string, QualifierJob[]>();
+  for (const job of jobs) {
+    const filter = filters.find((f) => f.id === job.match.filterId);
+    if (!filter?.ai_criteria) continue;
+    byFilter.set(filter.id, [...(byFilter.get(filter.id) || []), job]);
+  }
+  if (byFilter.size === 0) return out;
+
+  // Skills give the model context for criteria like "مناسب لمهاراتي"
+  const userIds = Array.from(new Set(Array.from(byFilter.values()).flat().map((j) => j.match.userId)));
+  const { data: profileRows } = await (supabaseAdmin.from('freelancer_profiles') as any)
+    .select('user_id, skills')
+    .in('user_id', userIds);
+  const skillsByUser = new Map<string, string[]>((profileRows || []).map((p: any) => [p.user_id, p.skills || []]));
+
+  await Promise.all(
+    Array.from(byFilter.entries()).map(async ([filterId, group]) => {
+      const filter = filters.find((f) => f.id === filterId)!;
+      const userId = filter.user_id;
+      const granted = await reserveEvaluations(userId, group.length).catch(() => 0);
+      const scored = group.slice(0, granted);
+      for (const job of group.slice(granted)) out.set(job.action.id, { result: null, quotaExhausted: true });
+      if (!scored.length) return;
+
+      const { results, failed } = await qualifyProjects(
+        filter.ai_criteria!,
+        scored.map((j) => ({
+          title: j.item.project.title,
+          description: j.item.project.description,
+          platform: j.item.project.platform,
+          budget: j.item.project.budget,
+        })),
+        skillsByUser.get(userId)
+      );
+      // Failed calls and projects the model skipped don't count against the quota
+      const unscored = results.filter((r) => !r).length;
+      if (unscored > 0) await releaseEvaluations(userId, unscored).catch(() => {});
+      if (failed) console.warn(`[Cron Ingest] AI qualifier: ${failed} projects unscored for filter ${filterId}`);
+
+      scored.forEach((job, i) => out.set(job.action.id, { result: results[i], quotaExhausted: false }));
+    })
+  );
+
+  // Persist scores (dashboard shows them, including below-threshold matches that got no alert)
+  const toSave = Array.from(out.entries()).filter(([, v]) => v.result);
+  await mapWithConcurrency(toSave, 10, ([actionId, v]) =>
+    (supabaseAdmin.from('user_project_actions') as any)
+      .update({ ai_score: v.result!.score, ai_reason: v.result!.reason })
+      .eq('id', actionId)
+  );
+
+  return out;
 }
 
 export async function GET(req: NextRequest) {
@@ -131,6 +210,8 @@ export async function GET(req: NextRequest) {
       exclude_new_clients: f.exclude_new_clients ?? false,
       job_type: f.job_type ?? 'any',
       client_countries: f.client_countries || [],
+      ai_criteria: f.ai_criteria?.trim() || null,
+      ai_min_score: f.ai_min_score ?? DEFAULT_AI_MIN_SCORE,
       created_at: f.created_at,
       updated_at: f.updated_at,
     }));
@@ -254,21 +335,35 @@ export async function GET(req: NextRequest) {
         return pricingByProject.get(key)!;
       };
 
+      // 6c-0. AI qualifier: new matches of filters with criteria get a 0-100 score + reason
+      const aiByAction = await qualifyNewMatches(
+        newActions.map((action) => ({ action, ...matchByCandidate.get(`${action.user_id}_${action.project_id}`)! })),
+        activeFilters
+      );
+
       const alertJobs = newActions
         .map((action) => ({ action, ...matchByCandidate.get(`${action.user_id}_${action.project_id}`)! }))
-        .filter(({ item, match }) => {
+        .filter(({ action, item, match }) => {
           const filter = activeFilters.find((f) => f.id === match.filterId);
           // A project still listed after retention cleanup deleted it comes back as "new": don't re-alert
           const publishedAt = new Date(item.project.published_at).getTime();
           if (publishedAt && Date.now() - publishedAt > ALERT_MAX_AGE_MS) return false;
+          // Below the filter's AI threshold: kept in the dashboard with its score, no alert.
+          // Unscored (AI failed / quota used up) still alerts, so no project is lost.
+          const ai = aiByAction.get(action.id);
+          if (ai?.result && ai.result.score < (filter?.ai_min_score ?? DEFAULT_AI_MIN_SCORE)) return false;
           return filter?.notify_telegram && userTelegramMap.has(match.userId);
         });
 
       const results = await mapWithConcurrency(alertJobs, 10, async ({ action, item, match }) => {
         const project = item.project;
+        const ai = aiByAction.get(action.id);
         return sendSmartFilterTelegramAlert(
           userTelegramMap.get(match.userId)!,
           {
+            ai_score: ai?.result?.score ?? null,
+            ai_reason: ai?.result?.reason ?? null,
+            ai_quota_exhausted: ai?.quotaExhausted ?? false,
             title: project.title,
             description: project.description,
             url: project.url,

@@ -81,6 +81,8 @@ interface FilterItem {
   exclude_new_clients?: boolean;
   job_type?: "any" | "fixed" | "hourly";
   client_countries?: string[];
+  ai_criteria?: string | null;
+  ai_min_score?: number;
   created_at?: string;
 }
 
@@ -138,6 +140,12 @@ export default function JobFiltersWorkspace() {
         if (data.ok && data.usd_egp) setUsdEgpRate(data.usd_egp);
       })
       .catch(() => {});
+    fetch("/api/projects/qualify")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.ok && typeof data.remaining === "number") setAiEvalsRemaining(data.remaining);
+      })
+      .catch(() => {});
   }, []);
 
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(ALL_PLATFORMS);
@@ -154,11 +162,17 @@ export default function JobFiltersWorkspace() {
   const [jobType, setJobType] = useState<"any" | "fixed" | "hourly">("any");
   const [clientCountries, setClientCountries] = useState<string[]>([]);
 
+  // AI qualifier (migration 0017): plain-language criteria + alert threshold
+  const [aiCriteria, setAiCriteria] = useState<string>("");
+  const [aiMinScore, setAiMinScore] = useState<number>(70);
+  const [aiEvalsRemaining, setAiEvalsRemaining] = useState<number | null>(null);
+
   // Accordion Expand/Collapse States
   const [openSections, setOpenSections] = useState({
     keywords: true,
     budget: true,
     quality: false,
+    ai: true,
     sites: true,
     advanced: false,
   });
@@ -169,7 +183,7 @@ export default function JobFiltersWorkspace() {
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
 
   // Qualification Scores Cache (projectId -> matchScore)
-  const [qualifyMap, setQualifyMap] = useState<Record<string, number>>({});
+  const [qualifyMap, setQualifyMap] = useState<Record<string, { score: number; reason: string }>>({});
   const [qualifyingId, setQualifyingId] = useState<string | null>(null);
   const [batchQualifying, setBatchQualifying] = useState(false);
 
@@ -279,6 +293,9 @@ export default function JobFiltersWorkspace() {
     setExcludeNewClients(!!f.exclude_new_clients);
     setJobType(f.job_type || "any");
     setClientCountries(f.client_countries || []);
+    setAiCriteria(f.ai_criteria || "");
+    setAiMinScore(f.ai_min_score ?? 70);
+    setQualifyMap({});
   };
 
   // Reset to fresh untitled filter
@@ -300,6 +317,9 @@ export default function JobFiltersWorkspace() {
     setExcludeNewClients(false);
     setJobType("any");
     setClientCountries([]);
+    setAiCriteria("");
+    setAiMinScore(70);
+    setQualifyMap({});
   };
 
   // Toggle Section in Accordion
@@ -473,6 +493,8 @@ export default function JobFiltersWorkspace() {
         exclude_new_clients: excludeNewClients,
         job_type: jobType,
         client_countries: clientCountries,
+        ai_criteria: aiCriteria.trim() || null,
+        ai_min_score: aiMinScore,
       };
 
       if (isNewFilter || selectedFilterId === "new") {
@@ -571,49 +593,53 @@ export default function JobFiltersWorkspace() {
     }
   };
 
-  // Calculate Match Score for Project
-  const calculateMatchScore = (project: ProjectItem): number => {
-    const text = `${project.title} ${project.description}`.toLowerCase();
-    let score = 65;
-
-    const skills = userSkills.length > 0 ? userSkills : ["next.js", "react", "typescript", "tailwind"];
-    let matchedSkills = 0;
-    for (const s of skills) {
-      if (text.includes(s.toLowerCase().trim())) {
-        matchedSkills++;
-      }
+  // Real AI scoring against the criteria typed in "شروطك للـ AI" (uses the monthly evaluation quota)
+  const qualifyWithAi = async (projectIds: string[]): Promise<number> => {
+    if (!aiCriteria.trim()) {
+      showToast("اكتب شروطك الأول في قسم \"🤖 شروطك للـ AI\"");
+      setOpenSections((prev) => ({ ...prev, ai: true }));
+      return 0;
     }
-    score += matchedSkills * 8;
-
-    if (project.budget_usd_estimate > 0) score += 6;
-    if (text.includes("urgent") || text.includes("عاجل")) score += 5;
-
-    return Math.min(98, Math.max(50, score));
+    const res = await fetch("/api/projects/qualify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ criteria: aiCriteria, project_ids: projectIds }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (typeof data.remaining === "number") setAiEvalsRemaining(data.remaining);
+    if (!data.ok) {
+      showToast(data.error || "تعذر فحص التوافق");
+      return 0;
+    }
+    setQualifyMap((prev) => ({ ...prev, ...data.scores }));
+    return Object.keys(data.scores || {}).length;
   };
 
   // Single Qualify Button Handler
-  const handleQualifySingle = (project: ProjectItem, e: React.MouseEvent) => {
+  const handleQualifySingle = async (project: ProjectItem, e: React.MouseEvent) => {
     e.stopPropagation();
     setQualifyingId(project.id);
-    setTimeout(() => {
-      const score = calculateMatchScore(project);
-      setQualifyMap((prev) => ({ ...prev, [project.id]: score }));
+    try {
+      await qualifyWithAi([project.id]);
+    } finally {
       setQualifyingId(null);
-    }, 400);
+    }
   };
 
-  // Batch Qualify Button Handler
-  const handleBatchQualify = () => {
+  // Batch Qualify Button Handler: the first 10 unscored projects in the preview
+  const handleBatchQualify = async () => {
+    const ids = filteredProjects.filter((p) => !qualifyMap[p.id]).slice(0, 10).map((p) => p.id);
+    if (!ids.length) {
+      showToast("كل المشاريع المعروضة اتفحصت");
+      return;
+    }
     setBatchQualifying(true);
-    setTimeout(() => {
-      const newMap: Record<string, number> = { ...qualifyMap };
-      for (const p of filteredProjects.slice(0, 30)) {
-        newMap[p.id] = calculateMatchScore(p);
-      }
-      setQualifyMap(newMap);
+    try {
+      const n = await qualifyWithAi(ids);
+      if (n) showToast(`✨ اتفحص ${n} مشروع بالـ AI`);
+    } finally {
       setBatchQualifying(false);
-      showToast(`✨ تم فحص وتأهيل ${Math.min(30, filteredProjects.length)} مشروعاً بنجاح`);
-    }, 700);
+    }
   };
 
   // Relative Time Formatter
@@ -1169,6 +1195,74 @@ export default function JobFiltersWorkspace() {
             )}
           </div>
 
+          {/* Accordion 2c: AI qualifier */}
+          <div className="bg-white">
+            <button
+              type="button"
+              onClick={() => toggleSection("ai")}
+              className="w-full px-4 py-3 flex items-center justify-between text-start hover:bg-slate-50/80 transition"
+            >
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                <span className="text-emerald-600">🤖</span>
+                <span>شروطك للـ AI</span>
+                {aiCriteria.trim() && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" aria-label="مفعّل" />}
+              </div>
+              {openSections.ai ? (
+                <ChevronUp className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
+
+            {openSections.ai && (
+              <div className="px-4 pb-4 space-y-3">
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  اكتب بكلامك انت إيه المشاريع اللي تناسبك. الـ AI هيقيّم كل مشروع جديد يعدّي الفلتر، ومش هيبعتلك تنبيه غير
+                  للمشاريع اللي توافقها {aiMinScore}% أو أكتر. سيبها فاضية لو مش عايز تقييم.
+                </p>
+                <textarea
+                  value={aiCriteria}
+                  onChange={(e) => setAiCriteria(e.target.value.slice(0, 1000))}
+                  rows={4}
+                  dir="auto"
+                  placeholder={"مثال: عايز مشاريع React أو Next.js بس، ميزانيتها 100$ أو أكتر.\nمش عايز واجبات جامعة، ولا تعديلات ووردبريس صغيرة، ولا مشاريع من غير وصف واضح."}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs leading-relaxed focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 resize-y"
+                />
+                <div className="flex items-center justify-between text-[10px] text-slate-400">
+                  <span>{aiCriteria.length}/1000</span>
+                  {aiEvalsRemaining !== null && <span>باقي {aiEvalsRemaining} تقييم الشهر ده</span>}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1.5">
+                    ابعتلي تنبيه لو التوافق {aiMinScore}% أو أكتر
+                  </label>
+                  <div className="flex gap-1.5">
+                    {[50, 60, 70, 80, 90].map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setAiMinScore(v)}
+                        className={`flex-1 text-[11px] font-bold py-1 rounded-md border transition ${
+                          aiMinScore === v
+                            ? "bg-emerald-600 border-emerald-600 text-white"
+                            : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                        }`}
+                      >
+                        {v}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-slate-400 leading-relaxed">
+                  جرّب شروطك قبل ما تحفظ: دوس "فحص التوافق" جنب أي مشروع في القايمة. المشاريع اللي توافقها أقل من الحد
+                  بتفضل في الداشبورد بنسبتها، بس من غير تنبيه. ولو الـ AI ماردّش أو الرصيد خلص، التنبيه بيوصلك عادي.
+                </p>
+              </div>
+            )}
+          </div>
+
           {/* Accordion 3: Sites & Categories (Mega Expansion: 20 Platforms & 14 Domains) */}
           <div className="bg-white">
             <button
@@ -1479,7 +1573,7 @@ export default function JobFiltersWorkspace() {
               className="bg-white border border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50 rounded-lg px-3 py-1.5 text-xs font-medium flex items-center gap-1.5 transition shadow-2xs disabled:opacity-50"
             >
               <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-              <span>{batchQualifying ? "جاري الفحص..." : "✨ فحص التوافق الذكي"}</span>
+              <span>{batchQualifying ? "جاري الفحص..." : "✨ فحص أول 10 بالـ AI"}</span>
             </button>
 
             {/* Action 3: Job Alerts */}
@@ -1621,13 +1715,16 @@ export default function JobFiltersWorkspace() {
                         <div className="col-span-2 hidden sm:flex items-center justify-center">
                           {matchScore !== undefined ? (
                             <span
-                              className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
-                                matchScore >= 80
+                              title={matchScore.reason}
+                              className={`text-[11px] font-bold px-2 py-0.5 rounded-full border cursor-help ${
+                                matchScore.score >= aiMinScore
                                   ? "bg-emerald-50 text-emerald-700 border-emerald-300"
-                                  : "bg-amber-50 text-amber-700 border-amber-300"
+                                  : matchScore.score >= 40
+                                    ? "bg-amber-50 text-amber-700 border-amber-300"
+                                    : "bg-rose-50 text-rose-700 border-rose-300"
                               }`}
                             >
-                              {matchScore}% تطابق
+                              {matchScore.score}% توافق
                             </span>
                           ) : (
                             <button

@@ -24,12 +24,31 @@ function smartFilterFields(body: Record<string, any>): Record<string, any> {
   if ("min_client_hire_rate" in body) out.min_client_hire_rate = intOrNull(body.min_client_hire_rate, 100);
   if ("exclude_new_clients" in body) out.exclude_new_clients = Boolean(body.exclude_new_clients);
   if ("job_type" in body) out.job_type = ["fixed", "hourly"].includes(body.job_type) ? body.job_type : "any";
+  // AI qualifier (migration 0017)
+  if ("ai_criteria" in body) {
+    const text = typeof body.ai_criteria === "string" ? body.ai_criteria.trim().slice(0, 1000) : "";
+    out.ai_criteria = text || null;
+  }
+  if ("ai_min_score" in body) {
+    const n = Math.round(Number(body.ai_min_score));
+    out.ai_min_score = Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 70;
+  }
   if ("client_countries" in body) {
     out.client_countries = Array.isArray(body.client_countries)
       ? body.client_countries.filter((c: any) => typeof c === "string" && c.trim()).slice(0, 30)
       : [];
   }
   return out;
+}
+
+/** Before migration 0017 the AI columns don't exist: retry the write without them. */
+function isMissingAiColumn(error: any): boolean {
+  return !!error && (error.code === "PGRST204" || error.code === "42703") && /ai_(criteria|min_score)/.test(error.message || "");
+}
+
+function withoutAiFields(payload: Record<string, any>): Record<string, any> {
+  const { ai_criteria, ai_min_score, ...rest } = payload;
+  return rest;
 }
 
 export async function GET(req: NextRequest) {
@@ -105,11 +124,10 @@ export async function POST(req: NextRequest) {
       ...smartFilterFields(body),
     };
 
-    const { data: inserted, error } = await (supabase
-      .from("user_filters") as any)
-      .insert(payload)
-      .select()
-      .single();
+    const insert = (row: Record<string, any>) =>
+      (supabase.from("user_filters") as any).insert(row).select().single();
+    let { data: inserted, error } = await insert(payload);
+    if (isMissingAiColumn(error)) ({ data: inserted, error } = await insert(withoutAiFields(payload)));
 
     if (error) throw error;
 
@@ -155,13 +173,10 @@ export async function PUT(req: NextRequest) {
     if (updates.notify_telegram !== undefined) payload.notify_telegram = Boolean(updates.notify_telegram);
     Object.assign(payload, smartFilterFields(updates));
 
-    const { data: updated, error } = await (supabase
-      .from("user_filters") as any)
-      .update(payload)
-      .eq("id", id)
-      .eq("user_id", user.id)
-      .select()
-      .single();
+    const update = (row: Record<string, any>) =>
+      (supabase.from("user_filters") as any).update(row).eq("id", id).eq("user_id", user.id).select().single();
+    let { data: updated, error } = await update(payload);
+    if (isMissingAiColumn(error)) ({ data: updated, error } = await update(withoutAiFields(payload)));
 
     if (error) throw error;
 

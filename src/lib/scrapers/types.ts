@@ -423,6 +423,9 @@ export interface UserFilter {
   exclude_new_clients?: boolean;
   job_type?: 'any' | 'fixed' | 'hourly';
   client_countries?: string[];
+  // AI qualifier (migration 0017): plain-language criteria; alerts need ai_min_score or more
+  ai_criteria?: string | null;
+  ai_min_score?: number;
   created_at?: string;
   updated_at?: string;
 }
