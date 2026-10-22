@@ -28,6 +28,9 @@ import {
   CATEGORIES_METADATA,
   UnifiedProject,
   ProjectInsights,
+  // post_text is "[PLATFORM - طلب مشروع]\nعنوان: ...\nالميزانية: ...\nالتفاصيل: ..." (buildPostText)
+  extractTitleFromPostText,
+  extractDetailsFromPostText,
 } from "@/lib/scrapers/types";
 import {
   getCompetitionVerdict,
@@ -277,7 +280,9 @@ export default function DashboardPage() {
   async function fetchLeads(isSilent = false) {
     if (!isSilent) setLeadsLoading(true);
     try {
-      const res = await fetch(`/api/leads?limit=100&time_window=${timeWindow}&sort_by=${sortBy}`);
+      // The feed is the whole market; AI-scored matches can be older than the latest 100
+      const limit = onlyAiFit ? 400 : 100;
+      const res = await fetch(`/api/leads?limit=${limit}&time_window=${timeWindow}&sort_by=${sortBy}`);
       const data = await res.json();
       if (data.ok && Array.isArray(data.leads)) {
         setLeads(data.leads);
@@ -343,7 +348,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchLeads(false);
-  }, [timeWindow, sortBy]);
+  }, [timeWindow, sortBy, onlyAiFit]);
 
   useEffect(() => {
     fetchActions();
@@ -363,7 +368,7 @@ export default function DashboardPage() {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [autoSync, timeWindow, sortBy]);
+  }, [autoSync, timeWindow, sortBy, onlyAiFit]);
 
   // Handle Manual Scan Trigger
   const handleScanNow = async () => {
@@ -391,29 +396,14 @@ export default function DashboardPage() {
     }
   };
 
-  // Helper to extract clean details for display
-  function extractDetailsFromPostText(text: string): string {
-    if (!text) return "";
-    let clean = text;
-    clean = clean.replace(/الميزانية:[^\n\r]+/gi, "");
-    clean = clean.replace(/التفاصيل:\s*/gi, "");
-    clean = clean.replace(/^(مشروع جديد:|[^\n\r]+)\r?\n/i, "");
-    return clean.trim();
-  }
-
-  function extractTitleFromPostText(text: string): string {
-    if (!text) return "";
-    const firstLine = text.split("\n")[0].trim();
-    return firstLine.replace(/^(مشروع جديد:\s*|طلب عمل حر:\s*)/i, "");
-  }
-
   // Unified Save / Un-save toggle
   // Explicitly sets notes: "user_saved" when saving, or un-saves when clicked again
   const handleToggleSaveLead = async (leadOrItem: any) => {
     const targetId = leadOrItem.project_id || leadOrItem.id;
     const currentAction = getLeadAction(leadOrItem);
     const isCurrentlySaved = currentAction?.status === "saved" && currentAction?.notes === "user_saved";
-    const newStatus = isCurrentlySaved ? "ignored" : "saved";
+    // Un-saving returns the project to the matched feed instead of hiding it as "ignored"
+    const newStatus = isCurrentlySaved ? "matched" : "saved";
 
     // Optimistic UI updates
     setTrackedActions((prev) => ({
@@ -510,9 +500,10 @@ export default function DashboardPage() {
         setTrackedActions((prev) => ({
           ...prev,
           [targetId]: {
+            ...prev[targetId], // keep ai_score / ai_reason
             id: data.action_id || targetId,
             project_id: targetId,
-            status: prev[targetId]?.status || "ignored",
+            status: prev[targetId]?.status || "matched",
             notes: prev[targetId]?.notes,
             generated_proposal: data.proposal,
           },
