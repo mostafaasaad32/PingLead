@@ -63,6 +63,17 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // Every audit is a Gemini call (and may fetch the given URL): signed-in users only
+  {
+    const supabase = await createServerSupabaseClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "غير مصرح - يرجى تسجيل الدخول" }, { status: 401 });
+    }
+  }
+
   try {
     const contentType = req.headers.get("content-type") || "";
     let auditResult: VollnaProfileAuditResult | null = null;

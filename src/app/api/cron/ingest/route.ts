@@ -392,19 +392,24 @@ export async function GET(req: NextRequest) {
       smartTelegramDispatched = results.filter(Boolean).length;
 
       // 6d. Auto-Bidding: only projects that are new matches this cycle
+      // Awaited: on Vercel un-awaited work can be frozen as soon as the response is sent
       const newProjectIds = new Set(newActions.map((a) => a.project_id));
+      const autoBidJobs: Promise<unknown>[] = [];
       for (const item of items) {
         const projectId = projectIdByKey.get(`${item.project.platform}_${item.project.external_id}`);
         if (!projectId || !newProjectIds.has(projectId)) continue;
-        evaluateProjectForAutoBidding({
-          id: projectId,
-          title: item.project.title,
-          description: item.project.description,
-          platform: item.project.platform,
-          url: item.project.url,
-          category: item.project.category,
-        }).catch((err) => console.error('[AutoBidder Ingest Hook Error]:', err));
+        autoBidJobs.push(
+          evaluateProjectForAutoBidding({
+            id: projectId,
+            title: item.project.title,
+            description: item.project.description,
+            platform: item.project.platform,
+            url: item.project.url,
+            category: item.project.category,
+          }).catch((err) => console.error('[AutoBidder Ingest Hook Error]:', err))
+        );
       }
+      await Promise.all(autoBidJobs);
     }
 
     // 7. Fallback: If no custom user filters are configured yet, dispatch high-intent projects to global subscribers

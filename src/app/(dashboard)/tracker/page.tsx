@@ -95,7 +95,8 @@ export default function TrackerPage() {
       await fetch("/api/tracker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: projectId, status: "ignored", notes: null }),
+        // Back to the matched feed; "ignored" would also hide it from analytics
+        body: JSON.stringify({ project_id: projectId, status: "matched", notes: null }),
       });
     } catch (err) {
       console.error(err);

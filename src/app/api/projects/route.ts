@@ -6,13 +6,25 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+const MAX_LIMIT = 500;
+
 export async function GET(req: NextRequest) {
+  // The project feed is the product: signed-in users only (same as /api/leads)
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "غير مصرح - يرجى تسجيل الدخول" }, { status: 401 });
+  }
+
   try {
     const { searchParams } = new URL(req.url);
-    const limit = parseInt(searchParams.get("limit") || "200", 10);
+    const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(searchParams.get("limit") || "200", 10) || 200));
     const platformsParam = searchParams.get("platforms");
     const categoriesParam = searchParams.get("categories");
     const minBudgetParam = searchParams.get("min_budget");
