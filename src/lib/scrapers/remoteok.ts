@@ -50,20 +50,31 @@ export async function scrapeRemoteOkCategory(
       if (categorySlug !== 'all' && !isCategoryMatch(cat, categorySlug)) continue;
 
       const title = `${job.company ? `${job.company}: ` : ''}${job.position}`;
-      const description = (job.description || job.position).replace(/<[^>]*>/g, '').slice(0, 1000);
+      // The API double-escapes newlines: descriptions contain literal "\n" sequences
+      const description = (job.description || job.position)
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/(?:\\[nrt])+/g, '\n')
+        .replace(/&amp;/g, '&')
+        .replace(/&#39;|&apos;/g, "'")
+        .replace(/&quot;/g, '"')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n\s*\n+/g, '\n')
+        .trim()
+        .slice(0, 1000);
       const postUrl = job.url || `https://remoteok.com/remote-jobs/${job.id}`;
 
       let budgetMin = job.salary_min || null;
       let budgetMax = job.salary_max || null;
       let budgetStr: string | null = null;
 
+      // Salary fields only: guessing from the description misreads "$100,000 - $120,000 a year"
+      // as "0 - 120". Yearly salaries, so label them.
       if (budgetMin || budgetMax) {
-        budgetStr = `$${budgetMin || 0} - $${budgetMax || 0}`;
-      } else {
-        const extracted = extractCleanBudget(fullText);
-        budgetMin = extracted.budget_min;
-        budgetMax = extracted.budget_max;
-        budgetStr = extracted.budget_text;
+        const fmt = (n: number) => `$${Number(n).toLocaleString('en-US')}`;
+        budgetStr =
+          budgetMin && budgetMax && budgetMin !== budgetMax
+            ? `${fmt(budgetMin)} - ${fmt(budgetMax)} / year`
+            : `${fmt(budgetMax || budgetMin)} / year`;
       }
 
       projects.push(

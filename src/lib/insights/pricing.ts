@@ -9,6 +9,7 @@
 import { getRates, convert, formatBudgetInEgp, formatEgp, type RatesSnapshot } from '@/lib/currency/rates';
 import { getMarketMedianUsd } from '@/lib/insights/market-stats';
 import { suggestPrice, formatDaysAr } from '@/lib/insights/price-suggestion';
+import { isJobBoard } from '@/lib/scrapers/types';
 
 export interface PricingInput {
   platform: string;
@@ -42,7 +43,8 @@ export async function getProjectPricing(
   const maxUsd = convert(p.budget_max, p.currency, 'USD', rates);
   const marketMedianUsd = p.category ? await getMarketMedianUsd(p.platform, p.category) : null;
 
-  const s = suggestPrice({
+  // Job boards list salaried roles (often yearly salaries): a project price/timeline makes no sense
+  const s = isJobBoard(p.platform) ? null : suggestPrice({
     budgetMinUsd: minUsd,
     budgetMaxUsd: maxUsd,
     bidsCount: p.bids_count,

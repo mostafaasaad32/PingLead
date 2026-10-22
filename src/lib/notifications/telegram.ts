@@ -7,7 +7,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import type { ProjectInsights } from '@/lib/scrapers/types';
+import { isJobBoard, type ProjectInsights } from '@/lib/scrapers/types';
 import type { ProjectPricing } from '@/lib/insights/pricing';
 import { getCompetitionVerdict, getClientVerdict } from '@/lib/insights/competition';
 
@@ -126,15 +126,20 @@ export async function sendSmartFilterTelegramAlert(
   }
 
   const cleanTitle = escapeHtml(project.title);
-  const cleanSnippet = escapeHtml((project.description || '').slice(0, 320).trim());
+  // Some feeds (RemoteOK) carry literal "\n" sequences in their text
+  const cleanSnippet = escapeHtml(
+    (project.description || '').replace(/(?:\\[nrt])+/g, ' ').replace(/\s+/g, ' ').slice(0, 320).trim()
+  );
+  const isJob = isJobBoard(project.platform);
   // Original budget, then its EGP equivalent (and a USD estimate for other currencies)
   const isUsd = !project.currency || ['USD', '$'].includes(project.currency.toUpperCase());
   const budgetExtras = [
     !isUsd && project.budget_usd_estimate ? `~$${project.budget_usd_estimate}` : null,
     project.pricing?.budgetEgpText || null,
   ].filter(Boolean);
+  // LRI/PDI isolate the Latin "$140000 - $250000" so the RTL message doesn't reorder it
   const budgetInfo = project.budget
-    ? `${project.budget}${budgetExtras.length ? ` (${budgetExtras.join(' · ')})` : ''}`
+    ? `⁦${project.budget}⁩${budgetExtras.length ? ` (${budgetExtras.join(' · ')})` : ''}`
     : 'غير محدد';
 
   const suggestion = project.pricing?.suggestion;
@@ -153,7 +158,7 @@ export async function sendSmartFilterTelegramAlert(
     `💼 <b>${cleanTitle}</b>\n` +
     (freshness ? `⏱️ <b>${freshness}</b>\n` : '') +
     `📍 <b>المنصة:</b> ${platformLabel}\n` +
-    `💰 <b>الميزانية:</b> ${escapeHtml(budgetInfo)}` +
+    `💰 <b>${isJob ? 'الراتب (وظيفة)' : 'الميزانية'}:</b> ${escapeHtml(budgetInfo)}` +
     `${suggestionLine}` +
     `${formatInsightLines(project)}\n` +
     `🏷️ <b>التصنيف:</b> #${project.category}\n\n` +
