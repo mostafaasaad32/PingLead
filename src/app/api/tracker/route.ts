@@ -35,8 +35,11 @@ export async function GET(req: NextRequest) {
         generated_proposal,
         notes,
         matched_filter_id,
+        ai_score,
+        ai_reason,
         created_at,
         updated_at,
+        user_filters ( ai_min_score ),
         projects (
           id,
           title,
@@ -73,6 +76,10 @@ export async function GET(req: NextRequest) {
         generated_proposal: item.generated_proposal,
         notes: item.notes,
         matched_filter_id: item.matched_filter_id,
+        // AI qualifier (migration 0017): score vs the matched filter's threshold
+        ai_score: item.ai_score ?? null,
+        ai_reason: item.ai_reason ?? null,
+        ai_min_score: item.user_filters?.ai_min_score ?? null,
         title: item.projects?.title || "مشروع عمل حر",
         description: item.projects?.description || "",
         url: item.projects?.url || "",

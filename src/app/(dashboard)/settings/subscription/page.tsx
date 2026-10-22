@@ -20,7 +20,18 @@ export default function SubscriptionSettingsPage() {
 
   const [loading, setLoading] = useState(true);
   const [credits, setCredits] = useState(25);
+  // AI project evaluations (filter criteria), separate monthly quota
+  const [evals, setEvals] = useState<{ remaining: number | null; monthly: number } | null>(null);
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>("monthly");
+
+  useEffect(() => {
+    fetch("/api/projects/qualify")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.ok) setEvals({ remaining: data.remaining, monthly: data.monthly });
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     async function loadSubscription() {
@@ -116,7 +127,45 @@ export default function SubscriptionSettingsPage() {
           </div>
 
           <div className="text-xs text-slate-500 sm:text-left">
-            <span>كل رصيد يمنحك توليد عرض كامل مخصص وعالي الإقناع عبر Gemini 2.0.</span>
+            <span>كل رصيد = عرض واحد بالـ AI. بيتجدد أول كل شهر.</span>
+          </div>
+        </div>
+
+        <div className="mt-5 pt-5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 border border-sky-200/60 text-xl">
+              🤖
+            </div>
+            <div>
+              <span className="text-xs text-slate-500 font-medium">تقييم المشاريع بالـ AI الشهر ده</span>
+              <div className="flex items-baseline gap-2 mt-0.5">
+                <span className="text-2xl font-black text-slate-900">
+                  {evals === null ? "..." : evals.remaining ?? "—"}
+                </span>
+                {evals && <span className="text-xs text-slate-500">من {evals.monthly}</span>}
+              </div>
+              {evals && typeof evals.remaining === "number" && (
+                <div
+                  className="mt-2 h-1.5 w-48 max-w-full rounded-full bg-slate-100 overflow-hidden"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={evals.monthly}
+                  aria-valuenow={evals.remaining}
+                  aria-label="التقييمات المتبقية"
+                >
+                  <div
+                    className="h-full rounded-full bg-sky-500"
+                    style={{ width: `${Math.round((evals.remaining / Math.max(1, evals.monthly)) * 100)}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-500 sm:text-left max-w-xs">
+            <span>
+              بيتخصم تقييم لكل مشروع جديد بيعدّي فلتر فيه "شروطك للـ AI"، أو لما تدوس "فحص التوافق". بيتجدد أول كل شهر.
+            </span>
           </div>
         </div>
       </div>

@@ -121,6 +121,30 @@ interface TrackedProjectAction {
   status: "matched" | "saved" | "applied" | "replied" | "ignored" | "won";
   generated_proposal?: string | null;
   notes?: string | null;
+  ai_score?: number | null;
+  ai_reason?: string | null;
+  ai_min_score?: number | null;
+}
+
+const DEFAULT_AI_MIN_SCORE = 70;
+
+/** AI qualifier badge: score against the user's criteria, reason on hover and on small screens */
+function AiScoreBadge({ action }: { action?: TrackedProjectAction }) {
+  if (typeof action?.ai_score !== "number") return null;
+  const score = action.ai_score;
+  const threshold = action.ai_min_score ?? DEFAULT_AI_MIN_SCORE;
+  const tone =
+    score >= threshold
+      ? "bg-emerald-50 text-emerald-800 border-emerald-200/70"
+      : score >= 40
+        ? "bg-amber-50 text-amber-800 border-amber-200/70"
+        : "bg-rose-50 text-rose-700 border-rose-200/70";
+  return (
+    <div className={`mb-3 inline-flex max-w-full items-start gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] ${tone}`}>
+      <span className="font-bold whitespace-nowrap">🤖 {score}% توافق</span>
+      {action.ai_reason && <span className="opacity-80">· {action.ai_reason}</span>}
+    </div>
+  );
 }
 
 interface TrackedItem {
@@ -203,6 +227,8 @@ export default function DashboardPage() {
   const [selectedPlatform, setSelectedPlatform] = useState("all");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [onlyHighIntent, setOnlyHighIntent] = useState(false);
+  // Only projects the AI scored at/above the filter's threshold
+  const [onlyAiFit, setOnlyAiFit] = useState(false);
   const [sortBy, setSortBy] = useState<"newest" | "oldest">("newest");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -280,6 +306,9 @@ export default function DashboardPage() {
             status: item.status,
             generated_proposal: item.generated_proposal,
             notes: item.notes,
+            ai_score: item.ai_score,
+            ai_reason: item.ai_reason,
+            ai_min_score: item.ai_min_score,
           };
           if (item.id) {
             map[item.id] = map[item.project_id];
@@ -562,8 +591,14 @@ export default function DashboardPage() {
     if (onlyHighIntent && (lead.intent_score || 0) < 8) {
       return false;
     }
+    if (onlyAiFit) {
+      const action = getLeadAction(lead);
+      if (typeof action?.ai_score !== "number") return false;
+      if (action.ai_score < (action.ai_min_score ?? DEFAULT_AI_MIN_SCORE)) return false;
+    }
     return true;
   });
+  const hasAiScores = Object.values(trackedActions).some((a) => typeof a.ai_score === "number");
 
   // Filtered Saved Jobs: Strictly projects explicitly saved by the user (status = saved & notes = user_saved)
   const filteredSavedJobs = trackerItems.filter((item) => {
@@ -761,6 +796,22 @@ export default function DashboardPage() {
                   </button>
                 ))}
               </div>
+
+              {hasAiScores && (
+                <button
+                  type="button"
+                  onClick={() => setOnlyAiFit((v) => !v)}
+                  aria-pressed={onlyAiFit}
+                  title="المشاريع اللي الـ AI قيّمها فوق الحد اللي اخترته في الفلتر"
+                  className={`px-3 py-1.5 text-[11px] font-bold rounded-xl border transition ${
+                    onlyAiFit
+                      ? "bg-emerald-600 border-emerald-600 text-white shadow-xs"
+                      : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                  }`}
+                >
+                  🤖 المناسب لشروطي بس
+                </button>
+              )}
             </div>
           </div>
 
@@ -992,6 +1043,8 @@ export default function DashboardPage() {
                         </h2>
 
                         <InsightChips insights={lead.insights} pricing={lead.pricing} />
+
+                        <AiScoreBadge action={action} />
 
                         {/* Project Description Snippet */}
                         <p className="text-xs text-slate-600 leading-relaxed line-clamp-3 mb-4 whitespace-pre-line">
