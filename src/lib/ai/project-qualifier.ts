@@ -23,6 +23,8 @@ export interface QualifierProject {
   description?: string | null;
   platform?: string | null;
   budget?: string | null;
+  /** Budget converted to USD (projects.budget_usd_estimate) */
+  budget_usd?: number | null;
 }
 
 export interface QualifierResult {
@@ -97,6 +99,7 @@ function buildPrompt(criteria: string, projects: QualifierProject[], skills?: st
     title: (p.title || '').slice(0, 200),
     platform: p.platform || '',
     budget: p.budget || 'not stated',
+    ...(p.budget_usd ? { budget_usd: Math.round(p.budget_usd) } : {}),
     description: (p.description || '').replace(/\s+/g, ' ').slice(0, 700),
   }));
 
@@ -114,6 +117,9 @@ Scoring:
 - 40-69: partly relevant, or important information is missing.
 - 0-39: violates a criterion (wrong tech, excluded project type, budget clearly below what they asked, etc.).
 - Don't punish a project only because the description is short or the budget isn't stated, unless the criteria require it.
+- An exclusion ("no design", "no content writing") applies only when that is the project's MAIN work. A development
+  project that also includes some UI design, copy or data entry as a sub-task still matches.
+- For budget rules use "budget_usd" (already converted to USD) when present; budgets in other currencies are not dollars.
 
 Return one item per project with:
 - "i": the project's index

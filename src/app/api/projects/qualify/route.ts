@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ error: "مفيش مشاريع للفحص." }, { status: 400 });
 
   const { data: projects, error } = await (supabaseAdmin.from("projects") as any)
-    .select("id, title, description, platform, budget")
+    .select("id, title, description, platform, budget, budget_usd_estimate")
     .in("id", ids);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!projects?.length) return NextResponse.json({ error: "المشاريع دي مش موجودة." }, { status: 404 });
@@ -69,7 +69,11 @@ export async function POST(req: NextRequest) {
     .eq("user_id", user.id)
     .maybeSingle();
 
-  const { results } = await qualifyProjects(criteria, toScore, profile?.skills || []);
+  const { results } = await qualifyProjects(
+    criteria,
+    toScore.map((p: any) => ({ ...p, budget_usd: p.budget_usd_estimate })),
+    profile?.skills || []
+  );
   const unscored = results.filter((r) => !r).length;
   if (unscored > 0) await releaseEvaluations(user.id, unscored);
 

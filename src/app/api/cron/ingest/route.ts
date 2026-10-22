@@ -100,6 +100,7 @@ async function qualifyNewMatches(jobs: QualifierJob[], filters: UserFilter[]): P
           description: j.item.project.description,
           platform: j.item.project.platform,
           budget: j.item.project.budget,
+          budget_usd: j.item.project.budget_usd_estimate,
         })),
         skillsByUser.get(userId)
       );
