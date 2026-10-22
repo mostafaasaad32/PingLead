@@ -528,10 +528,10 @@ export function createUnifiedProject(params: {
   const published_at = params.published_at || new Date().toISOString();
   const author = params.author || 'صاحب مشروع';
   const currency = params.currency || (params.language === 'ar' ? 'USD' : '$');
-  
+
   const budget = params.budget || (
-    params.budget_min || params.budget_max 
-      ? `${params.budget_min || 0} - ${params.budget_max || 0} ${currency}` 
+    params.budget_min || params.budget_max
+      ? `${params.budget_min || 0} - ${params.budget_max || 0} ${currency}`
       : null
   );
 

@@ -22,6 +22,7 @@ import { batchMatchProjects } from '@/lib/matching/filter-matcher';
 import { sendSmartFilterTelegramAlert, dispatchLeadToSubscribers } from '@/lib/telegram/dispatcher';
 import { evaluateProjectForAutoBidding } from '@/lib/auto-bidder/engine';
 import { getProjectPricing, type ProjectPricing } from '@/lib/insights/pricing';
+import { performProjectRetentionCleanup } from '@/lib/cleanup/retention';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Max execution time for serverless/Edge
@@ -215,8 +216,8 @@ export async function GET(req: NextRequest) {
           .upsert(rows.slice(i, i + 500), { onConflict: 'user_id,project_id', ignoreDuplicates: true })
           .select('id, user_id, project_id');
         if (error && (error as any).code === '23514') {
-          // Check constraint not yet updated with migration 0014: fallback to 'saved' tagged with auto_matched
-          const fallbackRows = rows.slice(i, i + 500).map((r) => ({ ...r, status: 'saved', notes: 'auto_matched' }));
+          // Check constraint fallback: tag as 'ignored' with auto_matched notes so it never masquerades as 'saved'
+          const fallbackRows = rows.slice(i, i + 500).map((r) => ({ ...r, status: 'ignored', notes: 'auto_matched' }));
           const res = await (supabaseAdmin.from('user_project_actions') as any)
             .upsert(fallbackRows, { onConflict: 'user_id,project_id', ignoreDuplicates: true })
             .select('id, user_id, project_id');
@@ -331,6 +332,11 @@ export async function GET(req: NextRequest) {
         }
       }
     }
+
+    // Trigger automatic 72-hour database retention cleanup in background
+    performProjectRetentionCleanup(72).catch((cleanupErr) =>
+      console.warn('[Cron Ingest] Background 72h cleanup warning:', cleanupErr.message)
+    );
 
     const durationMs = Date.now() - startTime;
 

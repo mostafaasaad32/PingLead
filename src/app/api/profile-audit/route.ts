@@ -12,6 +12,10 @@ import {
   ExtractedProfileData,
   VollnaProfileAuditResult,
 } from "@/lib/ai/profile-importer";
+import {
+  scrapeProfileByPlatform,
+  detectPlatformFromUrl as detectPlatformHelper,
+} from "@/lib/ai/profile-fetcher";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // 60s timeout for Gemini multi-step document analysis
@@ -74,16 +78,25 @@ export async function POST(req: NextRequest) {
       if (profileUrl && profileUrl.trim()) {
         targetProfileUrl = profileUrl.trim();
         detectedPlatform = detectPlatformFromUrl(targetProfileUrl);
-        const extracted = await extractProfileFromUrl(targetProfileUrl);
-        auditResult = await auditProfileWithAi({ profileData: extracted });
+        const extracted = await scrapeProfileByPlatform(targetProfileUrl);
+        auditResult = await auditProfileWithAi({
+          profileData: extracted,
+          platformType: detectedPlatform,
+        });
       } else if (file && file.size > 0) {
         const arrayBuffer = await file.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
-        auditResult = await auditProfileWithAi({ pdfBuffer: buffer });
         detectedPlatform = "upwork";
+        auditResult = await auditProfileWithAi({
+          pdfBuffer: buffer,
+          platformType: "upwork",
+        });
       } else if (rawText && rawText.trim()) {
-        auditResult = await auditProfileWithAi({ rawText: rawText.trim() });
         detectedPlatform = "custom";
+        auditResult = await auditProfileWithAi({
+          rawText: rawText.trim(),
+          platformType: "custom",
+        });
       } else {
         return NextResponse.json(
           { error: "يرجى تقديم رابط بروفايل أو نص لفحصه" },
@@ -150,22 +163,37 @@ export async function POST(req: NextRequest) {
           })),
         };
 
-        auditResult = await auditProfileWithAi({ profileData: structuredData });
+        auditResult = await auditProfileWithAi({
+          profileData: structuredData,
+          platformType: "pinglead",
+        });
       } else if (profileUrl && profileUrl.trim()) {
         targetProfileUrl = profileUrl.trim();
         detectedPlatform = detectPlatformFromUrl(targetProfileUrl);
-        const extracted = await extractProfileFromUrl(targetProfileUrl);
-        auditResult = await auditProfileWithAi({ profileData: extracted });
+        const extracted = await scrapeProfileByPlatform(targetProfileUrl);
+        auditResult = await auditProfileWithAi({
+          profileData: extracted,
+          platformType: detectedPlatform,
+        });
       } else if (fileBase64) {
         const buffer = Buffer.from(fileBase64, "base64");
-        auditResult = await auditProfileWithAi({ pdfBuffer: buffer });
         detectedPlatform = "upwork";
+        auditResult = await auditProfileWithAi({
+          pdfBuffer: buffer,
+          platformType: "upwork",
+        });
       } else if (profileData) {
-        auditResult = await auditProfileWithAi({ profileData });
-        detectedPlatform = detectPlatformFromUrl(profileData.sourceUrl);
+        detectedPlatform = detectPlatformFromUrl(profileData.sourceUrl || profileData.platformType);
+        auditResult = await auditProfileWithAi({
+          profileData,
+          platformType: detectedPlatform,
+        });
       } else if (rawText && rawText.trim()) {
-        auditResult = await auditProfileWithAi({ rawText: rawText.trim() });
         detectedPlatform = "custom";
+        auditResult = await auditProfileWithAi({
+          rawText: rawText.trim(),
+          platformType: "custom",
+        });
       } else {
         return NextResponse.json(
           { error: "يرجى تقديم بيانات صالحة لفحص البروفايل" },
@@ -183,6 +211,7 @@ export async function POST(req: NextRequest) {
 
     // Attach metadata
     auditResult.platform = detectedPlatform;
+    auditResult.platformType = detectedPlatform as any;
     auditResult.auditUrl = targetProfileUrl || undefined;
     auditResult.auditedAt = new Date().toISOString();
 
@@ -220,6 +249,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       audit: auditResult,
       platform: detectedPlatform,
+      platformType: detectedPlatform,
     });
   } catch (err: any) {
     console.error("[Profile Audit API] Error:", err);

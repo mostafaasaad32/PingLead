@@ -26,6 +26,7 @@ import {
   Save,
   ExternalLink,
   ChevronRight,
+  ChevronLeft,
   TrendingUp,
   Briefcase,
   Clock,
@@ -33,6 +34,9 @@ import {
   AlertCircle,
   ArrowUpDown,
   GraduationCap,
+  ShieldCheck,
+  Star,
+  Lightbulb,
 } from "lucide-react";
 import type {
   VollnaProfileAuditResult,
@@ -48,7 +52,70 @@ type TabKey =
   | "portfolio"
   | "experience"
   | "video"
-  | "catalog";
+  | "catalog"
+  | "trust_metrics"
+  | "gigs"
+  | "upsells";
+
+function ProfileAvatar({
+  avatarUrl,
+  name,
+  sizeClass = "w-16 h-16 sm:w-18 sm:h-18",
+  textClass = "text-xl font-black",
+}: {
+  avatarUrl?: string | null;
+  name: string;
+  sizeClass?: string;
+  textClass?: string;
+}) {
+  const [src, setSrc] = useState<string | null>(avatarUrl || null);
+  const [hasTriedProxy, setHasTriedProxy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setSrc(avatarUrl || null);
+    setHasTriedProxy(false);
+    setFailed(!avatarUrl);
+  }, [avatarUrl]);
+
+  const initials = (name || "PL")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
+
+  if (!src || failed) {
+    return (
+      <div
+        className={`${sizeClass} rounded-full overflow-hidden border-2 border-slate-200/90 bg-gradient-to-tr from-slate-100 to-slate-200 flex items-center justify-center shrink-0 shadow-xs`}
+      >
+        <span className={`${textClass} text-slate-600`}>{initials}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`${sizeClass} rounded-full overflow-hidden border-2 border-slate-200/90 bg-white flex items-center justify-center shrink-0 shadow-xs`}
+    >
+      <img
+        src={src}
+        alt={name}
+        className="w-full h-full object-cover"
+        onError={() => {
+          if (!hasTriedProxy && avatarUrl && !avatarUrl.startsWith("/api/")) {
+            setHasTriedProxy(true);
+            setSrc(`/api/avatar-proxy?url=${encodeURIComponent(avatarUrl)}`);
+          } else {
+            setFailed(true);
+          }
+        }}
+      />
+    </div>
+  );
+}
 
 export default function ProfileAuditPage() {
   // Input State
@@ -86,6 +153,8 @@ export default function ProfileAuditPage() {
   const [copiedCatalogIndex, setCopiedCatalogIndex] = useState<number | null>(null);
   const [copiedRewriteTitleIndex, setCopiedRewriteTitleIndex] = useState<number | null>(null);
   const [copiedRewriteDescIndex, setCopiedRewriteDescIndex] = useState<number | null>(null);
+  const [copiedGigIndex, setCopiedGigIndex] = useState<number | null>(null);
+  const [copiedUpsellIndex, setCopiedUpsellIndex] = useState<number | null>(null);
 
   // Save / Sync to PingLead Profile State
   const [showSyncModal, setShowSyncModal] = useState(false);
@@ -138,7 +207,7 @@ export default function ProfileAuditPage() {
             const merged = { ...prev, ...data.platformAudits };
             try {
               localStorage.setItem("pinglead_profile_audits_v2", JSON.stringify(merged));
-            } catch {}
+            } catch { }
             return merged;
           });
           setAuditResult((prev) => {
@@ -151,7 +220,7 @@ export default function ProfileAuditPage() {
           });
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   const handleRunAudit = async () => {
@@ -221,8 +290,8 @@ export default function ProfileAuditPage() {
         (activeInputTab === "upwork_url"
           ? "upwork"
           : activeInputTab === "current_profile"
-          ? "pinglead"
-          : detectPlatformKey(profileUrl));
+            ? "pinglead"
+            : detectPlatformKey(profileUrl));
 
       data.audit.platform = platformKey;
 
@@ -237,7 +306,7 @@ export default function ProfileAuditPage() {
         const updated = { ...prev, [platformKey]: data.audit };
         try {
           localStorage.setItem("pinglead_profile_audits_v2", JSON.stringify(updated));
-        } catch {}
+        } catch { }
         return updated;
       });
 
@@ -276,11 +345,34 @@ export default function ProfileAuditPage() {
   };
 
   const handleCopyFullOverview = () => {
-    const fullText = auditResult?.sections.overview.fullRewrittenOverview;
+    let fullText = auditResult?.sections.overview?.fullRewrittenOverview;
+    if (!fullText && auditResult?.sections.overview?.suggestedStructure) {
+      fullText = auditResult.sections.overview.suggestedStructure
+        .map((b) => {
+          const body = b.content || (b.bullets ? b.bullets.map((x) => `• ${x}`).join("\n") : "");
+          return `[${b.title}]\n${body}`;
+        })
+        .filter(Boolean)
+        .join("\n\n");
+    }
     if (!fullText) return;
     navigator.clipboard.writeText(fullText);
     setCopiedFullOverview(true);
     setTimeout(() => setCopiedFullOverview(false), 3000);
+  };
+
+  const handleCopyGig = (gig: { title: string; description: string; price?: string; category?: string }, idx: number) => {
+    const text = `${gig.title}\n${gig.category ? `الفئة: ${gig.category}\n` : ""}السعر: ${gig.price || "5$"}\n\nالوصف:\n${gig.description}`;
+    navigator.clipboard.writeText(text);
+    setCopiedGigIndex(idx);
+    setTimeout(() => setCopiedGigIndex(null), 2500);
+  };
+
+  const handleCopyUpsell = (upsell: { addon: string; extraPrice: string; extraDays: string; pitch: string }, idx: number) => {
+    const text = `تطوير: ${upsell.addon}\nالسعر الإضافي: +${upsell.extraPrice} (خلال +${upsell.extraDays})\n\nتفاصيل التطوير:\n${upsell.pitch}`;
+    navigator.clipboard.writeText(text);
+    setCopiedUpsellIndex(idx);
+    setTimeout(() => setCopiedUpsellIndex(null), 2500);
   };
 
   const handleOpenSyncModal = () => {
@@ -311,7 +403,7 @@ export default function ProfileAuditPage() {
       setSavedToProfile(true);
       setToastMessage(
         data.message ||
-          "✅ تم تحديث هويتك الذكية، ومزامنة المهارات وسابقة الأعمال مع مولد العروض وفلاتر المشاريع!"
+        "✅ تم تحديث هويتك الذكية، ومزامنة المهارات وسابقة الأعمال مع مولد العروض وفلاتر المشاريع!"
       );
       setShowToast(true);
       setTimeout(() => setShowToast(false), 6500);
@@ -481,26 +573,55 @@ export default function ProfileAuditPage() {
       sections,
     } = auditResult;
 
-    // Smart RTL / LTR Language Detection
-    const isEnglishProfile = Boolean(
-      activePlatformKey === "upwork" ||
-      activePlatformKey === "freelancer" ||
-      auditResult.platform === "upwork" ||
-      auditResult.platform === "freelancer" ||
-      (currentTitle && /^[A-Za-z]/.test(currentTitle.trim())) ||
-      (freelancerName && /^[A-Za-z]/.test(freelancerName.trim()))
-    );
+    // Smart Platform & Language Detection
+    const effectivePlatform =
+      auditResult.platformType ||
+      auditResult.platform ||
+      activePlatformKey ||
+      "upwork";
 
-    const tabsList: Array<{ key: TabKey; label: string; status: VollnaSectionStatus }> = [
-      { key: "overview", label: "Overview", status: sections.overview.status },
-      { key: "title", label: "Title", status: sections.title.status },
-      { key: "image", label: "Image", status: sections.image.status },
-      { key: "skills", label: "Skills", status: sections.skills.status },
-      { key: "portfolio", label: "Portfolio", status: sections.portfolio.status },
-      { key: "experience", label: "Experience", status: sections.experience.status },
-      { key: "video", label: "Video", status: sections.video.status },
-      { key: "catalog", label: "Catalog", status: sections.catalog.status },
-    ];
+    const isUpwork = effectivePlatform === "upwork" || effectivePlatform === "freelancer";
+    const isMostaqlOrNafezly = effectivePlatform === "mostaql" || effectivePlatform === "nafezly";
+    const isKhamsat = effectivePlatform === "khamsat";
+    const isEnglishProfile = Boolean(isUpwork);
+
+    // Platform-Adaptive Tab List
+    let tabsList: Array<{ key: TabKey; label: string; status: VollnaSectionStatus }> = [];
+
+    if (isMostaqlOrNafezly) {
+      tabsList = [
+        { key: "overview", label: "النبذة التعريفية", status: sections.overview?.status || "warning" },
+        { key: "title", label: "المسمى الوظيفي", status: sections.title?.status || "good" },
+        { key: "portfolio", label: "معرض الأعمال", status: sections.portfolio?.status || "warning" },
+        { key: "skills", label: "المهارات والكلمات المفتاحية", status: sections.skills?.status || "good" },
+        { key: "trust_metrics", label: "مؤشرات الثقة والأوسمة", status: sections.trust_metrics?.status || "good" },
+        { key: "image", label: "الصورة والانطباع الأول", status: sections.image?.status || "good" },
+      ];
+    } else if (isKhamsat) {
+      tabsList = [
+        { key: "gigs", label: "الخدمات المنشورة", status: sections.gigs?.status || "warning" },
+        { key: "upsells", label: "تطويرات الخدمات المقترحة", status: sections.upsells?.status || "warning" },
+        { key: "overview", label: "النبذة التعريفية للبائع", status: sections.overview?.status || "good" },
+        { key: "trust_metrics", label: "رتبة البائع وسرعة الرد", status: sections.trust_metrics?.status || "good" },
+        { key: "image", label: "الهوية البصرية والصورة", status: sections.image?.status || "good" },
+      ];
+    } else {
+      tabsList = [
+        { key: "overview", label: "Overview", status: sections.overview?.status || "warning" },
+        { key: "title", label: "Title", status: sections.title?.status || "warning" },
+        { key: "image", label: "Image", status: sections.image?.status || "good" },
+        { key: "skills", label: "Skills", status: sections.skills?.status || "warning" },
+        { key: "portfolio", label: "Portfolio", status: sections.portfolio?.status || "warning" },
+        { key: "experience", label: "Experience", status: sections.experience?.status || "warning" },
+        { key: "video", label: "Video", status: sections.video?.status || "warning" },
+        { key: "catalog", label: "Catalog", status: sections.catalog?.status || "warning" },
+      ];
+    }
+
+    const availableKeys = tabsList.map((t) => t.key);
+    const effectiveActiveTab: TabKey = availableKeys.includes(activeTab)
+      ? activeTab
+      : tabsList[0].key;
 
     // SVG Circular Progress calculation
     const radius = 34;
@@ -509,16 +630,16 @@ export default function ProfileAuditPage() {
     const progressColor =
       overallScore >= 75 ? "#10B981" : overallScore >= 50 ? "#F59E0B" : "#F43F5E";
 
-    // Skills slot calculation
-    const skillsUsed = sections.skills.usedSlots || sections.skills.currentSkills?.length || 0;
-    const skillsMax = sections.skills.maxSlots || 20;
+    // Skills slot calculation (with safe optional chaining)
+    const skillsUsed = sections.skills?.usedSlots || sections.skills?.currentSkills?.length || 0;
+    const skillsMax = sections.skills?.maxSlots || 20;
     const skillsPercent = Math.min(100, Math.round((skillsUsed / skillsMax) * 100));
 
     // Combined skills count for sync modal
     const combinedSkillsCount = Array.from(
       new Set([
-        ...(sections.skills.currentSkills || []),
-        ...(sections.skills.skillsToAdd || []),
+        ...(sections.skills?.currentSkills || []),
+        ...(sections.skills?.skillsToAdd || []),
       ])
     ).length;
 
@@ -544,7 +665,7 @@ export default function ProfileAuditPage() {
             <div className="flex items-center gap-3 self-start sm:self-auto">
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100/90 text-slate-600 text-xs font-medium border border-slate-200/70">
                 <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                <span>Update every few weeks to stay visible.</span>
+                <span>{isEnglishProfile ? "Update every few weeks to stay visible." : "حدّث بروفايلك دورياً للبقاء في صدارة البحث."}</span>
               </div>
 
               <button
@@ -598,9 +719,8 @@ export default function ProfileAuditPage() {
                         key={key}
                         type="button"
                         onClick={() => handleSwitchPlatform(key)}
-                        className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold border transition shrink-0 ${
-                          isActive ? meta.activeClass : meta.inactiveClass
-                        }`}
+                        className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold border transition shrink-0 ${isActive ? meta.activeClass : meta.inactiveClass
+                          }`}
                       >
                         <span className={`w-2 h-2 rounded-full ${meta.dot}`} />
                         <span>{meta.label}</span>
@@ -628,663 +748,461 @@ export default function ProfileAuditPage() {
           {/* Requirement 3: Inner Review Container with Smart RTL/LTR Direction */}
           <div
             dir={isEnglishProfile ? "ltr" : "rtl"}
-            className={`${isEnglishProfile ? "text-left font-sans" : "text-right"} space-y-6 transition-all duration-200`}
+            className={`${isEnglishProfile ? "text-left font-sans" : "text-right font-sans"} space-y-6 transition-all duration-200`}
           >
 
-          {/* Profile Summary Card (Matching Vollna) */}
-          <div className="bg-white border border-slate-200/90 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-6 border-b border-slate-100">
-              {/* Freelancer Avatar & Name */}
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-full overflow-hidden border-2 border-slate-200/90 bg-gradient-to-tr from-slate-100 to-slate-200 flex items-center justify-center shrink-0 shadow-xs">
-                  {avatarUrl && !avatarError ? (
-                    <img
-                      src={avatarUrl}
-                      alt={freelancerName}
-                      className="w-full h-full object-cover"
-                      referrerPolicy="no-referrer"
-                      onError={() => setAvatarError(true)}
-                    />
-                  ) : (
-                    <span className="text-xl font-black text-slate-600">
-                      {freelancerName.slice(0, 2).toUpperCase()}
-                    </span>
-                  )}
-                </div>
+            {/* Profile Summary Card (Matching Vollna) */}
+            <div className="bg-white border border-slate-200/90 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-6 border-b border-slate-100">
+                {/* Freelancer Avatar & Name */}
+                <div className="flex items-center gap-4">
+                  <ProfileAvatar
+                    avatarUrl={avatarUrl}
+                    name={freelancerName}
+                    sizeClass="w-16 h-16 sm:w-18 sm:h-18"
+                    textClass="text-xl font-black"
+                  />
 
-                <div>
-                  <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                    {freelancerName}
-                  </h2>
-                  <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5 dir-ltr text-left">
-                    {currentTitle}
-                  </p>
-                </div>
-              </div>
-
-              {/* Circular Progress Ring */}
-              <div className="flex items-center gap-3 self-end sm:self-auto">
-                <div className="relative w-20 h-20 flex items-center justify-center">
-                  <svg className="w-20 h-20 -rotate-90" viewBox="0 0 80 80">
-                    <circle
-                      cx="40"
-                      cy="40"
-                      r={radius}
-                      stroke="#E2E8F0"
-                      strokeWidth="6"
-                      fill="none"
-                    />
-                    <circle
-                      cx="40"
-                      cy="40"
-                      r={radius}
-                      stroke={progressColor}
-                      strokeWidth="6"
-                      fill="none"
-                      strokeDasharray={circumference}
-                      strokeDashoffset={strokeDashoffset}
-                      strokeLinecap="round"
-                      className="transition-all duration-1000 ease-out"
-                    />
-                  </svg>
-                  <span className="absolute text-base sm:text-lg font-black text-slate-900">
-                    {overallScore}%
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Deep Stats Bar */}
-            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 pt-1">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700">
-                <Briefcase className="w-3.5 h-3.5 text-slate-400" />
-                <span>{stats?.totalJobs ?? 1} Total jobs</span>
-              </div>
-
-              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700">
-                <Clock className="w-3.5 h-3.5 text-slate-400" />
-                <span>{stats?.totalHours ?? 0} Total hours</span>
-              </div>
-
-              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700">
-                <DollarSign className="w-3.5 h-3.5 text-slate-400" />
-                <span>{stats?.hourlyRate ?? "$15.00/hr"}</span>
-              </div>
-
-              {stats?.activeContracts && stats.activeContracts.length > 0 && (
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Active contract: {stats.activeContracts.join(", ")}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Executive Summary */}
-            <div className="pt-2">
-              <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                Summary
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans">
-                {executiveSummary}
-              </p>
-            </div>
-          </div>
-
-          {/* Vollna Platform Info Banner */}
-          <div className="p-4 rounded-2xl bg-slate-100/70 border border-slate-200/80 text-xs text-slate-600 flex items-start sm:items-center gap-3">
-            <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5 sm:mt-0" />
-            <p className="leading-relaxed">
-              Upwork & freelance platforms may take up to 30 days to fully re-index profile changes.
-              Use the rewrites below as a starting point.
-            </p>
-          </div>
-
-          {/* 8 Status Tabs (Matching Vollna) */}
-          <div className="border-b border-slate-200 overflow-x-auto scrollbar-none">
-            <nav className="flex items-center gap-6 min-w-max">
-              {tabsList.map((t) => {
-                const isActive = activeTab === t.key;
-                return (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => setActiveTab(t.key)}
-                    className={`py-3 px-1 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition relative ${
-                      isActive
-                        ? "border-slate-900 text-slate-900"
-                        : "border-transparent text-slate-500 hover:text-slate-800"
-                    }`}
-                  >
-                    <span className={`w-2 h-2 rounded-full ${getStatusColor(t.status)}`} />
-                    <span>{t.label}</span>
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
-
-          {/* ==================================================================== */}
-          {/* TAB 1: OVERVIEW (SPLIT VIEW) */}
-          {/* ==================================================================== */}
-          {activeTab === "overview" && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-              {/* Left Column: Current Overview */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between pb-1">
-                  <h3 className="text-sm font-black text-slate-900">Current overview</h3>
-                  <span className="text-xs font-semibold text-slate-400">
-                    {sections.overview.wordCount} words · {sections.overview.charCount} characters
-                  </span>
-                </div>
-
-                <div className="bg-white border border-slate-200 rounded-2xl p-5 max-h-[640px] overflow-y-auto text-xs sm:text-sm text-slate-700 leading-relaxed font-sans whitespace-pre-wrap shadow-xs">
-                  {sections.overview.currentText || (
-                    <span className="text-slate-400 italic">No overview text found.</span>
-                  )}
-                </div>
-
-                {/* Freelancer-Centric Hook Alert */}
-                {(sections.overview.currentText?.toLowerCase().startsWith("as a dedicated") ||
-                  sections.overview.currentText?.toLowerCase().startsWith("i am")) && (
-                  <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2.5">
-                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    <p className="leading-relaxed">
-                      <strong>Freelancer-centric opening:</strong> Opening with <em>&quot;As a dedicated...&quot;</em> or <em>&quot;I am...&quot;</em> loses client attention. Clients decide within the first 2 lines whether to click &quot;more&quot;. Lead with their business problem or outcome instead.
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                      {freelancerName}
+                    </h2>
+                    <p className={`text-xs sm:text-sm text-slate-500 font-medium mt-0.5 ${isEnglishProfile ? "dir-ltr text-left" : "dir-rtl text-right"}`}>
+                      {currentTitle}
                     </p>
                   </div>
-                )}
-              </div>
-
-              {/* Right Column: Suggested Structure */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between pb-1">
-                  <h3 className="text-sm font-black text-slate-900">Suggested structure</h3>
-                  <button
-                    type="button"
-                    onClick={handleCopyFullOverview}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition shadow-xs"
-                  >
-                    {copiedFullOverview ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copy Full Overview</span>
-                      </>
-                    )}
-                  </button>
                 </div>
 
-                <div className="space-y-3.5 max-h-[640px] overflow-y-auto pr-1">
-                  {sections.overview.suggestedStructure.map((block) => {
-                    const isCopied = copiedBlockId === block.id;
-                    const blockContentToCopy =
-                      block.content || (block.bullets ? block.bullets.join("\n") : "");
-
-                    return (
-                      <div
-                        key={block.id}
-                        className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs transition hover:border-slate-300"
-                      >
-                        <div className="flex items-start justify-between gap-3 mb-2.5">
-                          <div>
-                            <h4 className="text-sm font-black text-slate-900">{block.title}</h4>
-                            <p className="text-[11px] font-medium text-slate-400">{block.subtitle}</p>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => handleCopyText(blockContentToCopy, block.id)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
-                            title="Copy block"
-                          >
-                            {isCopied ? (
-                              <Check className="w-4 h-4 text-emerald-600" />
-                            ) : (
-                              <Copy className="w-4 h-4" />
-                            )}
-                          </button>
-                        </div>
-
-                        {block.content && (
-                          <p className="text-xs sm:text-sm text-slate-800 leading-relaxed font-sans">
-                            {block.content}
-                          </p>
-                        )}
-
-                        {block.bullets && block.bullets.length > 0 && (
-                          <ul className="space-y-1.5 mt-2">
-                            {block.bullets.map((b, i) => (
-                              <li
-                                key={i}
-                                className="text-xs sm:text-sm text-slate-800 leading-relaxed font-sans flex items-start gap-2"
-                              >
-                                <span className="text-slate-400 shrink-0">•</span>
-                                <span>{b}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ==================================================================== */}
-          {/* TAB 2: TITLE */}
-          {/* ==================================================================== */}
-          {activeTab === "title" && (
-            <div className="space-y-6">
-              {/* Current Title Card */}
-              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 shadow-xs">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-                  <h3 className="text-sm font-black text-slate-900">Current Title</h3>
-                  {getStatusBadge(sections.title.status)}
-                </div>
-
-                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 font-bold text-sm text-slate-800 dir-ltr text-left">
-                  {sections.title.currentText}
-                </div>
-
-                <div className="mt-4 text-xs text-slate-600 leading-relaxed font-sans">
-                  <span className="font-bold text-slate-900">Analysis: </span>
-                  {sections.title.analysis}
-                </div>
-              </div>
-
-              {/* Suggestions */}
-              <div className="space-y-3">
-                <h3 className="text-sm font-black text-slate-900">Recommended Titles</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {sections.title.suggestions.map((s, idx) => {
-                    const isCopied = copiedTitleIndex === idx;
-                    return (
-                      <div
-                        key={idx}
-                        className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex flex-col justify-between hover:border-slate-300 transition"
-                      >
-                        <div>
-                          <div className="text-[10px] font-black uppercase tracking-wider text-emerald-600 mb-1">
-                            {s.label}
-                          </div>
-                          <p className="text-[11px] text-slate-400 mb-3">{s.subtitle}</p>
-                          <p className="text-xs sm:text-sm font-bold text-slate-900 leading-relaxed dir-ltr text-left">
-                            {s.content}
-                          </p>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(s.content);
-                            setCopiedTitleIndex(idx);
-                            setTimeout(() => setCopiedTitleIndex(null), 2500);
-                          }}
-                          className="mt-4 pt-3 border-t border-slate-100 inline-flex items-center justify-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 transition"
-                        >
-                          {isCopied ? (
-                            <>
-                              <Check className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>Copied!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3.5 h-3.5 text-slate-400" />
-                              <span>Use this title</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ==================================================================== */}
-          {/* TAB 3: IMAGE */}
-          {/* ==================================================================== */}
-          {activeTab === "image" && (
-            <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
-                    <Camera className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-black text-slate-900">Profile Photo & First Impression</h3>
-                    <p className="text-xs text-slate-400">Headshot framing, eye contact, and ID verification</p>
-                  </div>
-                </div>
-                {getStatusBadge(sections.image.status)}
-              </div>
-
-              {/* Photo Preview Card */}
-              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 p-5 rounded-2xl bg-slate-50 border border-slate-200">
-                <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-slate-200/90 bg-white flex items-center justify-center shrink-0 shadow-xs">
-                  {avatarUrl && !avatarError ? (
-                    <img
-                      src={avatarUrl}
-                      alt={freelancerName}
-                      className="w-full h-full object-cover"
-                      referrerPolicy="no-referrer"
-                      onError={() => setAvatarError(true)}
-                    />
-                  ) : (
-                    <span className="text-2xl font-black text-slate-600">
-                      {freelancerName.slice(0, 2).toUpperCase()}
-                    </span>
-                  )}
-                </div>
-
-                <div className="space-y-1.5 text-center sm:text-left">
-                  <div className="flex items-center justify-center sm:justify-start gap-2">
-                    <span className="text-sm font-bold text-slate-900">{freelancerName}</span>
-                    {avatarUrl && !avatarError ? (
-                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200 flex items-center gap-1">
-                        <Check className="w-3 h-3 text-emerald-600" />
-                        <span>Extracted Profile Picture</span>
-                      </span>
-                    ) : (
-                      <span className="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-bold border border-amber-200">
-                        Default Initials (No Photo URL)
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    {avatarUrl && !avatarError
-                      ? "Your actual profile photo pulled directly from your public freelance profile."
-                      : "No direct headshot URL was detected. Make sure your profile has a public portrait photo."}
-                  </p>
-                </div>
-              </div>
-
-              <div className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans space-y-4">
-                <p>{sections.image.analysis}</p>
-
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
-                  <h4 className="font-bold text-slate-900">Vollna Photo Checklist:</h4>
-                  <ul className="space-y-1.5 text-slate-600">
-                    <li className="flex items-center gap-2">
-                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>Face takes up 60-70% of the circular frame with clear eye contact.</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>Neutral or uncluttered high-contrast background (light gray, white, or soft office).</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>Complete Identity Verification (IDV) check for the blue/green verification badge.</span>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ==================================================================== */}
-          {/* TAB 4: SKILLS (VOLLNA HIGH-PRECISION) */}
-          {/* ==================================================================== */}
-          {activeTab === "skills" && (
-            <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                <div>
-                  <h3 className="text-base font-black text-slate-900">Search Algorithm Skills & Tags</h3>
-                  <p className="text-xs text-slate-400">Optimize keywords and skill ordering to rank higher in client searches</p>
-                </div>
-                {getStatusBadge(sections.skills.status)}
-              </div>
-
-              {/* Requirement 4: Quick Action - Convert Suggested Skills to Project Radar Filter */}
-              <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border border-emerald-200/90 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">🎯</span>
-                    <h4 className="text-sm font-black text-slate-900">
-                      تحويل هذه المهارات إلى فلتر رادار تلقائي
-                    </h4>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                      بضغطة واحدة
+                {/* Circular Progress Ring */}
+                <div className="flex items-center gap-3 self-end sm:self-auto">
+                  <div className="relative w-20 h-20 flex items-center justify-center">
+                    <svg className="w-20 h-20 -rotate-90" viewBox="0 0 80 80">
+                      <circle
+                        cx="40"
+                        cy="40"
+                        r={radius}
+                        stroke="#E2E8F0"
+                        strokeWidth="6"
+                        fill="none"
+                      />
+                      <circle
+                        cx="40"
+                        cy="40"
+                        r={radius}
+                        stroke={progressColor}
+                        strokeWidth="6"
+                        fill="none"
+                        strokeDasharray={circumference}
+                        strokeDashoffset={strokeDashoffset}
+                        strokeLinecap="round"
+                        className="transition-all duration-1000 ease-out"
+                      />
+                    </svg>
+                    <span className="absolute text-base sm:text-lg font-black text-slate-900">
+                      {overallScore}%
                     </span>
                   </div>
-                  <p className="text-xs text-slate-600 leading-relaxed font-sans">
-                    احفظ أهم الكلمات المفتاحية المقترحة تلقائياً في صفحة فلاتر المشاريع ليتم إشعارك فوراً عبر تيليجرام عند طرح أي مشروع جديد يطابق تخصصك!
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  {filterCreated && (
-                    <Link
-                      href="/filters"
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:text-slate-900 text-xs font-bold transition shadow-xs"
-                    >
-                      <span>عرض الفلاتر</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </Link>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={handleCreateFilterFromSkills}
-                    disabled={creatingFilter}
-                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition shrink-0 disabled:opacity-50"
-                  >
-                    {creatingFilter ? (
-                      <span>جاري إنشاء الفلتر...</span>
-                    ) : filterCreated ? (
-                      <>
-                        <Check className="w-4 h-4 text-white" />
-                        <span>تم تفعيل الفلتر بنجاح!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-4 h-4" />
-                        <span>🎯 تحويل هذه المهارات إلى فلتر رادار تلقائي</span>
-                      </>
-                    )}
-                  </button>
                 </div>
               </div>
 
-              {/* Slot Utilization Bar */}
-              <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-                <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                  <span>Skill Slots Utilization</span>
-                  <span>
-                    {skillsUsed} of {skillsMax} used ({skillsPercent}%)
-                  </span>
-                </div>
-                <div className="w-full h-2.5 rounded-full bg-slate-200 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${
-                      skillsUsed >= 18
-                        ? "bg-emerald-500"
-                        : skillsUsed >= 12
-                        ? "bg-amber-500"
-                        : "bg-rose-500"
-                    }`}
-                    style={{ width: `${skillsPercent}%` }}
-                  />
-                </div>
-                {skillsUsed < 15 && (
-                  <p className="text-[11px] text-amber-800 font-medium pt-1">
-                    ⚠️ Upwork allows up to 20 skills. Using only {skillsUsed} leaves {skillsMax - skillsUsed} valuable search keywords unused.
-                  </p>
-                )}
-              </div>
+              {/* Dynamic Stats Bar */}
+              <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 pt-1">
+                {isMostaqlOrNafezly ? (
+                  <>
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 shadow-2xs">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>معدل الإكمال: {stats?.completionRate || "100%"}</span>
+                    </div>
 
-              <div className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans">
-                {sections.skills.analysis}
-              </div>
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-xs font-bold text-blue-800 shadow-2xs">
+                      <TrendingUp className="w-3.5 h-3.5 text-blue-600" />
+                      <span>إعادة التوظيف: {stats?.rehireRate || "0%"}</span>
+                    </div>
 
-              {/* Skills to Reorder (Vollna Feature) */}
-              {sections.skills.skillsToReorder && sections.skills.skillsToReorder.length > 0 && (
-                <div className="p-5 rounded-2xl bg-amber-50/70 border border-amber-200/90 space-y-3">
-                  <div className="flex items-center gap-2 text-xs font-black text-amber-950 uppercase tracking-wider">
-                    <ArrowUpDown className="w-4 h-4 text-amber-600" />
-                    <span>Skills to Reorder (Prioritize in Upwork Search)</span>
-                  </div>
-                  <p className="text-xs text-amber-900 leading-relaxed font-sans">
-                    Upwork weighs your top 3-4 skills heaviest in search rankings. Reposition your core niche specializations to the top:
-                  </p>
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-50 border border-purple-200 text-xs font-bold text-purple-800 shadow-2xs">
+                      <Briefcase className="w-3.5 h-3.5 text-purple-600" />
+                      <span>المشاريع المنجزة: {stats?.completedProjects ?? 0}</span>
+                    </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-1">
-                    {sections.skills.skillsToReorder.map((item, idx) => (
-                      <div
-                        key={idx}
-                        className="bg-white p-3.5 rounded-xl border border-amber-200 shadow-2xs flex flex-col justify-between"
-                      >
-                        <span className="text-xs font-bold text-slate-900">{item.skill}</span>
-                        <div className="flex items-center gap-2 mt-2 text-xs font-bold">
-                          <span className="text-slate-400">#{item.fromRank}</span>
-                          <span className="text-amber-500">➔</span>
-                          <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                            #{item.toRank}
-                          </span>
-                        </div>
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 shadow-2xs">
+                      <Layers className="w-3.5 h-3.5 text-amber-600" />
+                      <span>أعمال المعرض: {sections.portfolio?.currentCount ?? stats?.portfolioCount ?? 0}</span>
+                    </div>
+
+                    {stats?.badges && stats.badges.length > 0 && stats.badges.map((b, idx) => (
+                      <div key={idx} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700">
+                        <Award className="w-3.5 h-3.5 text-slate-400" />
+                        <span>{b}</span>
                       </div>
                     ))}
-                  </div>
-                </div>
-              )}
+                  </>
+                ) : isKhamsat ? (
+                  <>
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 shadow-2xs">
+                      <ShoppingBag className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>الخدمات النشطة: {stats?.activeServicesCount ?? sections.gigs?.currentCount ?? 0}</span>
+                    </div>
 
-              {/* Recommended Skills to Add */}
-              <div>
-                <div className="flex items-center justify-between mb-2.5">
-                  <h4 className="text-xs font-black text-emerald-700 uppercase tracking-wider">
-                    Recommended Skills to Add ({sections.skills.skillsToAdd?.length || 0})
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(sections.skills.skillsToAdd.join(", "));
-                      setCopiedSkills(true);
-                      setTimeout(() => setCopiedSkills(false), 2500);
-                    }}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900"
-                  >
-                    {copiedSkills ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Copied All!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copy All Skills</span>
-                      </>
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 shadow-2xs">
+                      <Award className="w-3.5 h-3.5 text-amber-600" />
+                      <span>التقييم العام: {stats?.overallRating || "100%"}</span>
+                    </div>
+
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-xs font-bold text-blue-800 shadow-2xs">
+                      <User className="w-3.5 h-3.5 text-blue-600" />
+                      <span>رتبة البائع: {stats?.sellerLevel || "بائع جديد"}</span>
+                    </div>
+
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-50 border border-purple-200 text-xs font-bold text-purple-800 shadow-2xs">
+                      <Clock className="w-3.5 h-3.5 text-purple-600" />
+                      <span>سرعة الرد: {stats?.responseSpeed || "خلال ساعة"}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700">
+                      <Briefcase className="w-3.5 h-3.5 text-slate-400" />
+                      <span>{stats?.totalJobs ?? 1} Total jobs</span>
+                    </div>
+
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700">
+                      <Clock className="w-3.5 h-3.5 text-slate-400" />
+                      <span>{stats?.totalHours ?? 0} Total hours</span>
+                    </div>
+
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700">
+                      <DollarSign className="w-3.5 h-3.5 text-slate-400" />
+                      <span>{stats?.hourlyRate ?? "$15.00/hr"}</span>
+                    </div>
+
+                    {stats?.activeContracts && stats.activeContracts.length > 0 && (
+                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>Active contract: {stats.activeContracts.join(", ")}</span>
+                      </div>
                     )}
-                  </button>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {sections.skills.skillsToAdd?.map((s, idx) => (
-                    <span
-                      key={idx}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-900 text-xs font-bold border border-emerald-200 flex items-center gap-1"
-                    >
-                      <Plus className="w-3 h-3 text-emerald-600" />
-                      <span>{s}</span>
-                    </span>
-                  ))}
-                </div>
+                  </>
+                )}
               </div>
 
-              {/* Current Skills in Order */}
-              <div>
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2.5">
-                  Current Skills in Order ({sections.skills.currentSkills?.length || 0})
-                </h4>
-                <div className="flex flex-wrap gap-2">
-                  {sections.skills.currentSkills?.map((s, idx) => (
-                    <span
-                      key={idx}
-                      className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-800 text-xs font-bold border border-slate-200 flex items-center gap-1.5"
-                    >
-                      <span className="text-[10px] text-slate-400 font-mono">#{idx + 1}</span>
-                      <span>{s}</span>
-                    </span>
-                  ))}
-                </div>
+              {/* Executive Summary */}
+              <div className="pt-2">
+                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">
+                  {isEnglishProfile ? "Summary" : "الملخص التشخيصي للبروفايل"}
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans">
+                  {executiveSummary}
+                </p>
               </div>
             </div>
-          )}
 
-          {/* ==================================================================== */}
-          {/* TAB 5: PORTFOLIO (VOLLNA CASE STUDIES) */}
-          {/* ==================================================================== */}
-          {activeTab === "portfolio" && (
-            <div className="space-y-6">
-              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-5">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                  <div>
-                    <h3 className="text-base font-black text-slate-900">Portfolio & Case Studies</h3>
-                    <p className="text-xs text-slate-400">
-                      Current items published: {sections.portfolio.currentCount}
-                    </p>
+            {/* Platform Info Banner */}
+            <div className="p-4 rounded-2xl bg-slate-100/70 border border-slate-200/80 text-xs text-slate-600 flex items-start sm:items-center gap-3">
+              <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5 sm:mt-0" />
+              <p className="leading-relaxed">
+                {isMostaqlOrNafezly
+                  ? `منصات العمل الحر العربية (${effectivePlatform === "nafezly" ? "نفذلي" : "مستقل"}) تعتمد بشكل رئيسي على سابقة الأعمال ومعدل إكمال المشاريع لترتيبك في الصدارة. استخدم المقترحات أدناه لرفع نسبة فوزك بالمشاريع فوراً.`
+                  : isKhamsat
+                  ? "في خمسات، تحسين عناوين الخدمات وإضافة تطويرات ذكية يضاعف أرباحك من نفس المشتري ويرفع سرعة ترقيتك لبائع نشيط ومميز."
+                  : "Upwork & freelance platforms may take up to 30 days to fully re-index profile changes. Use the rewrites below as a starting point."}
+              </p>
+            </div>
+
+            {/* Dynamic Status Tabs */}
+            <div className="border-b border-slate-200 overflow-x-auto scrollbar-none">
+              <nav className="flex items-center gap-6 min-w-max">
+                {tabsList.map((t) => {
+                  const isActive = effectiveActiveTab === t.key;
+                  return (
+                    <button
+                      key={t.key}
+                      type="button"
+                      onClick={() => setActiveTab(t.key)}
+                      className={`py-3 px-1 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition relative ${isActive
+                          ? "border-slate-900 text-slate-900"
+                          : "border-transparent text-slate-500 hover:text-slate-800"
+                        }`}
+                    >
+                      <span className={`w-2 h-2 rounded-full ${getStatusColor(t.status)}`} />
+                      <span>{t.label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+            </div>
+
+            {/* ==================================================================== */}
+            {/* TAB 1: OVERVIEW (SPLIT VIEW) */}
+            {/* ==================================================================== */}
+            {effectiveActiveTab === "overview" && (
+              isEnglishProfile ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                  {/* Left Column: Current Overview */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between pb-1">
+                      <h3 className="text-sm font-black text-slate-900">Current overview</h3>
+                      <span className="text-xs font-semibold text-slate-400">
+                        {sections.overview?.wordCount ?? 0} words · {sections.overview?.charCount ?? 0} characters
+                      </span>
+                    </div>
+
+                    <div className="bg-white border border-slate-200 rounded-2xl p-5 max-h-[640px] overflow-y-auto text-xs sm:text-sm text-slate-700 leading-relaxed font-sans whitespace-pre-wrap shadow-xs">
+                      {sections.overview?.currentText || (
+                        <span className="text-slate-400 italic">No overview text found.</span>
+                      )}
+                    </div>
+
+                    {/* Freelancer-Centric Hook Alert */}
+                    {(sections.overview?.currentText?.toLowerCase().startsWith("as a dedicated") ||
+                      sections.overview?.currentText?.toLowerCase().startsWith("i am")) && (
+                        <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2.5">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                          <p className="leading-relaxed">
+                            <strong>Freelancer-centric opening:</strong> Opening with <em>&quot;As a dedicated...&quot;</em> or <em>&quot;I am...&quot;</em> loses client attention. Clients decide within the first 2 lines whether to click &quot;more&quot;. Lead with their business problem or outcome instead.
+                          </p>
+                        </div>
+                      )}
                   </div>
-                  {getStatusBadge(sections.portfolio.status)}
-                </div>
 
-                {/* Vollna Alert Banner when Portfolio is 0 */}
-                {sections.portfolio.currentCount === 0 && (
-                  <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 flex items-start gap-3">
-                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                    <div>
-                      <h4 className="text-xs font-bold text-amber-950">
-                        {sections.portfolio.alertTitle || "No portfolio items yet"}
-                      </h4>
-                      <p className="text-xs text-amber-900/90 mt-0.5 leading-relaxed font-sans">
-                        {sections.portfolio.alertMessage ||
-                          "Adding 2-3 strong case studies is the fastest way to increase conversion."}
+                  {/* Right Column: Suggested Structure */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between pb-1">
+                      <h3 className="text-sm font-black text-slate-900">Suggested structure</h3>
+                      <button
+                        type="button"
+                        onClick={handleCopyFullOverview}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition shadow-xs"
+                      >
+                        {copiedFullOverview ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copy Full Overview</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="space-y-3.5 max-h-[640px] overflow-y-auto pr-1">
+                      {sections.overview?.suggestedStructure?.map((block) => {
+                        const isCopied = copiedBlockId === block.id;
+                        const blockContentToCopy =
+                          block.content || (block.bullets ? block.bullets.join("\n") : "");
+
+                        return (
+                          <div
+                            key={block.id}
+                            className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs transition hover:border-slate-300"
+                          >
+                            <div className="flex items-start justify-between gap-3 mb-2.5">
+                              <div>
+                                <h4 className="text-sm font-black text-slate-900">{block.title}</h4>
+                                <p className="text-[11px] font-medium text-slate-400">{block.subtitle}</p>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => handleCopyText(blockContentToCopy, block.id)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                                title="Copy block"
+                              >
+                                {isCopied ? (
+                                  <Check className="w-4 h-4 text-emerald-600" />
+                                ) : (
+                                  <Copy className="w-4 h-4" />
+                                )}
+                              </button>
+                            </div>
+
+                            {block.content && (
+                              <p className="text-xs sm:text-sm text-slate-800 leading-relaxed font-sans">
+                                {block.content}
+                              </p>
+                            )}
+
+                            {block.bullets && block.bullets.length > 0 && (
+                              <ul className="space-y-1.5 mt-2">
+                                {block.bullets.map((b, i) => (
+                                  <li
+                                    key={i}
+                                    className="text-xs sm:text-sm text-slate-800 leading-relaxed font-sans flex items-start gap-2"
+                                  >
+                                    <span className="text-slate-400 shrink-0">•</span>
+                                    <span>{b}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                  {/* Right Column (RTL): Current Overview */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between pb-1">
+                      <h3 className="text-sm font-black text-slate-900">النبذة الحالية المسجلة</h3>
+                      <span className="text-xs font-semibold text-slate-400">
+                        {sections.overview?.wordCount ?? 0} كلمة · {sections.overview?.charCount ?? 0} حرف
+                      </span>
+                    </div>
+
+                    <div className="bg-white border border-slate-200 rounded-2xl p-5 max-h-[640px] overflow-y-auto text-xs sm:text-sm text-slate-700 leading-relaxed font-sans whitespace-pre-wrap shadow-xs">
+                      {sections.overview?.currentText || (
+                        <span className="text-slate-400 italic">لا توجد نبذة تعريفية مسجلة حالياً في الحساب.</span>
+                      )}
+                    </div>
+
+                    {/* Arabic Cliché & Value Prop Warning */}
+                    <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <p className="leading-relaxed">
+                        <strong>تنبيه صياغة النبذة:</strong> البدء بعبارات تقليدية مثل <em>&quot;أنا فلان... أعمل كـ...&quot;</em> أو سرد الأدوات دون توضيح النتائج يُفقدك اهتمام العميل العربي خلال أول 3 ثوانٍ! العميل يريد معرفة ما الذي ستضيفه لمشروعه وكيف ستوفر عليه الوقت والتكلفة.
                       </p>
                     </div>
                   </div>
-                )}
 
-                {/* Project Case Study Ideas */}
-                <div>
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-3">
-                    High-Converting Case Study Ideas to Add:
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {sections.portfolio.projectIdeas?.map((p, idx) => {
-                      const isCopied = copiedPortfolioIndex === idx;
-                      return (
-                        <div
-                          key={idx}
-                          className="p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between hover:border-slate-300 transition"
-                        >
-                          <div className="space-y-2">
-                            <h5 className="font-bold text-sm text-slate-900">{p.title}</h5>
-                            <p className="text-xs text-slate-600 leading-relaxed font-sans">
-                              {p.description}
-                            </p>
-                            {p.whyItWorks && (
-                              <div className="pt-2 text-[11px] text-emerald-800 bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200/80 font-medium">
-                                <span className="font-bold">Why it converts: </span>
-                                {p.whyItWorks}
+                  {/* Left Column (RTL): Suggested Structure Cards */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between pb-1">
+                      <h3 className="text-sm font-black text-slate-900">الهيكل المقترح للنبذة الاحترافية</h3>
+                      <button
+                        type="button"
+                        onClick={handleCopyFullOverview}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition shadow-xs"
+                      >
+                        {copiedFullOverview ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>تم نسخ النبذة كاملة!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>نسخ كامل النبذة المقترحة</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="space-y-3.5 max-h-[640px] overflow-y-auto pl-1">
+                      {sections.overview?.suggestedStructure?.map((block) => {
+                        const isCopied = copiedBlockId === block.id;
+                        const blockContentToCopy =
+                          block.content || (block.bullets ? block.bullets.join("\n") : "");
+
+                        return (
+                          <div
+                            key={block.id}
+                            className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs transition hover:border-slate-300"
+                          >
+                            <div className="flex items-start justify-between gap-3 mb-2.5">
+                              <div>
+                                <h4 className="text-sm font-black text-slate-900">{block.title}</h4>
+                                <p className="text-[11px] font-medium text-slate-400">{block.subtitle}</p>
                               </div>
+
+                              <button
+                                type="button"
+                                onClick={() => handleCopyText(blockContentToCopy, block.id)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                                title="نسخ هذا الجزء"
+                              >
+                                {isCopied ? (
+                                  <Check className="w-4 h-4 text-emerald-600" />
+                                ) : (
+                                  <Copy className="w-4 h-4" />
+                                )}
+                              </button>
+                            </div>
+
+                            {block.content && (
+                              <p className="text-xs sm:text-sm text-slate-800 leading-relaxed font-sans">
+                                {block.content}
+                              </p>
+                            )}
+
+                            {block.bullets && block.bullets.length > 0 && (
+                              <ul className="space-y-1.5 mt-2">
+                                {block.bullets.map((b, i) => (
+                                  <li
+                                    key={i}
+                                    className="text-xs sm:text-sm text-slate-800 leading-relaxed font-sans flex items-start gap-2"
+                                  >
+                                    <span className="text-emerald-500 font-bold shrink-0">✓</span>
+                                    <span>{b}</span>
+                                  </li>
+                                ))}
+                              </ul>
                             )}
                           </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
 
-                          <div className="mt-4 pt-3 border-t border-slate-200/80 flex items-center justify-between gap-3">
+            {/* ==================================================================== */}
+            {/* TAB 2: TITLE */}
+            {/* ==================================================================== */}
+            {effectiveActiveTab === "title" && (
+              isEnglishProfile ? (
+                <div className="space-y-6">
+                  {/* Current Title Card */}
+                  <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 shadow-xs">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                      <h3 className="text-sm font-black text-slate-900">Current Title</h3>
+                      {getStatusBadge(sections.title?.status || "warning")}
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 font-bold text-sm text-slate-800 dir-ltr text-left">
+                      {sections.title?.currentText}
+                    </div>
+
+                    <div className="mt-4 text-xs text-slate-600 leading-relaxed font-sans">
+                      <span className="font-bold text-slate-900">Analysis: </span>
+                      {sections.title?.analysis}
+                    </div>
+                  </div>
+
+                  {/* Suggestions */}
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-black text-slate-900">Recommended Titles</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {sections.title?.suggestions?.map((s, idx) => {
+                        const isCopied = copiedTitleIndex === idx;
+                        return (
+                          <div
+                            key={idx}
+                            className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex flex-col justify-between hover:border-slate-300 transition"
+                          >
+                            <div>
+                              <div className="text-[10px] font-black uppercase tracking-wider text-emerald-600 mb-1">
+                                {s.label}
+                              </div>
+                              <p className="text-[11px] text-slate-400 mb-3">{s.subtitle}</p>
+                              <p className="text-xs sm:text-sm font-bold text-slate-900 leading-relaxed dir-ltr text-left">
+                                {s.content}
+                              </p>
+                            </div>
+
                             <button
                               type="button"
                               onClick={() => {
-                                navigator.clipboard.writeText(`${p.title}\n\n${p.description}`);
-                                setCopiedPortfolioIndex(idx);
-                                setTimeout(() => setCopiedPortfolioIndex(null), 2500);
+                                navigator.clipboard.writeText(s.content);
+                                setCopiedTitleIndex(idx);
+                                setTimeout(() => setCopiedTitleIndex(null), 2500);
                               }}
-                              className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900"
+                              className="mt-4 pt-3 border-t border-slate-100 inline-flex items-center justify-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 transition"
                             >
                               {isCopied ? (
                                 <>
@@ -1294,429 +1212,1546 @@ export default function ProfileAuditPage() {
                               ) : (
                                 <>
                                   <Copy className="w-3.5 h-3.5 text-slate-400" />
-                                  <span>Copy Outline</span>
+                                  <span>Use this title</span>
                                 </>
                               )}
                             </button>
-
-                            <Link
-                              href="/portfolio"
-                              className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-800"
-                            >
-                              <span>إضافة لمعرض أعمالي</span>
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            </Link>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ==================================================================== */}
-          {/* TAB 6: EXPERIENCE */}
-          {/* ==================================================================== */}
-          {activeTab === "experience" && (
-            <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                <div>
-                  <h3 className="text-base font-black text-slate-900">Employment History & Credentials</h3>
-                  <p className="text-xs text-slate-400">Position past roles with client-facing keywords and measurable outcomes</p>
-                </div>
-                {getStatusBadge(sections.experience.status)}
-              </div>
-
-              {/* Alert Banner */}
-              <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="text-xs font-bold text-amber-950">
-                    {sections.experience.alertTitle || "Attention needed"}
-                  </h4>
-                  <p className="text-xs text-amber-900/90 mt-0.5 leading-relaxed font-sans">
-                    {sections.experience.alertMessage}
-                  </p>
-                </div>
-              </div>
-
-              {/* Employment History Note */}
-              {sections.experience.employmentHistoryNote && (
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-700 leading-relaxed font-sans">
-                  <span className="font-bold text-slate-900">Profile Diagnosis: </span>
-                  {sections.experience.employmentHistoryNote}
-                </div>
-              )}
-
-              {/* Employment Rewrites */}
-              {sections.experience.employmentRewrites && sections.experience.employmentRewrites.length > 0 && (
-                <div className="space-y-3">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
-                    Recommended Role Rewrites
-                  </h4>
-                  <div className="space-y-4">
-                    {sections.experience.employmentRewrites.map((r, idx) => {
-                      const isTitleCopied = copiedRewriteTitleIndex === idx;
-                      const isDescCopied = copiedRewriteDescIndex === idx;
-
-                      return (
-                        <div
-                          key={idx}
-                          className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4"
-                        >
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-200/80">
-                            <div>
-                              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                                Current:
-                              </span>
-                              <span className="ml-2 font-bold text-xs text-slate-700">
-                                {r.currentRole} at {r.company}
-                              </span>
-                            </div>
-                            <span className="text-[11px] text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 font-bold self-start sm:self-auto">
-                              High-Leverage Signal
-                            </span>
-                          </div>
-
-                          {/* Recommended Title */}
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-slate-900">Recommended Title:</span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(r.recommendedTitle);
-                                  setCopiedRewriteTitleIndex(idx);
-                                  setTimeout(() => setCopiedRewriteTitleIndex(null), 2500);
-                                }}
-                                className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-slate-900"
-                              >
-                                {isTitleCopied ? (
-                                  <>
-                                    <Check className="w-3 h-3 text-emerald-600" />
-                                    <span>Copied!</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy className="w-3 h-3 text-slate-400" />
-                                    <span>Copy Title</span>
-                                  </>
-                                )}
-                              </button>
-                            </div>
-                            <div className="p-3 bg-white rounded-xl border border-slate-200 text-xs font-bold text-slate-900 dir-ltr text-left">
-                              {r.recommendedTitle}
-                            </div>
-                          </div>
-
-                          {/* Recommended Description */}
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-slate-900">Recommended Description:</span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(r.recommendedDescription);
-                                  setCopiedRewriteDescIndex(idx);
-                                  setTimeout(() => setCopiedRewriteDescIndex(null), 2500);
-                                }}
-                                className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-slate-900"
-                              >
-                                {isDescCopied ? (
-                                  <>
-                                    <Check className="w-3 h-3 text-emerald-600" />
-                                    <span>Copied!</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy className="w-3 h-3 text-slate-400" />
-                                    <span>Copy Description</span>
-                                  </>
-                                )}
-                              </button>
-                            </div>
-                            <div className="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed font-sans whitespace-pre-wrap dir-ltr text-left">
-                              {r.recommendedDescription}
-                            </div>
-                          </div>
-
-                          {/* Why it works */}
-                          {r.whyItWorks && (
-                            <div className="text-[11px] text-slate-500 leading-relaxed font-sans">
-                              <span className="font-bold text-slate-700">Rationale: </span>
-                              {r.whyItWorks}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Roles to Add */}
-              {sections.experience.rolesToAdd && sections.experience.rolesToAdd.length > 0 && (
-                <div className="space-y-3">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
-                    Role Ideas to Add (Fill Entry Gaps)
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {sections.experience.rolesToAdd.map((role, idx) => (
-                      <div key={idx} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5">
-                        <h5 className="font-bold text-xs text-slate-900">{role.title}</h5>
-                        <p className="text-xs text-slate-600 leading-relaxed font-sans">
-                          {role.description}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Suggested Additions (Certifications & Open Source) */}
-              {sections.experience.suggestedAdditions && sections.experience.suggestedAdditions.length > 0 && (
-                <div className="space-y-3">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
-                    High-Value Credentials & Proof Points
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {sections.experience.suggestedAdditions.map((item, idx) => (
-                      <div
-                        key={idx}
-                        className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between"
-                      >
-                        <div>
-                          <span className="inline-block px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold uppercase mb-2">
-                            {item.type}
-                          </span>
-                          <h5 className="font-bold text-xs text-slate-900 mb-1">{item.title}</h5>
-                          <p className="text-xs text-slate-600 leading-relaxed font-sans">
-                            {item.description}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ==================================================================== */}
-          {/* TAB 7: VIDEO */}
-          {/* ==================================================================== */}
-          {activeTab === "video" && (
-            <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
-                    <Video className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-black text-slate-900">45-Second Introduction Video</h3>
-                    <p className="text-xs text-slate-400">Profiles with an intro video receive up to 3x more invites</p>
-                  </div>
-                </div>
-                {getStatusBadge(sections.video.status)}
-              </div>
-
-              {/* Video Status Banner */}
-              {!sections.video.hasVideo ? (
-                <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 flex items-start gap-3">
-                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <h4 className="text-xs font-bold text-amber-950">No video introduction found (-5 pts)</h4>
-                    <p className="text-xs text-amber-900/90 mt-0.5 leading-relaxed font-sans">
-                      A short 45-second headshot video dramatically boosts client trust and helps overcome lack of review history.
-                    </p>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               ) : (
-                <div className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-200 flex items-start gap-3">
-                  <Check className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                  <div>
-                    <h4 className="text-xs font-bold text-emerald-950">Video introduction present (+5 pts)</h4>
-                    <p className="text-xs text-emerald-900/90 mt-0.5 leading-relaxed font-sans">
-                      Great job having a video introduction! Review the script below to optimize your delivery.
-                    </p>
+                <div className="space-y-6">
+                  {/* Current Title Card (Arabic) */}
+                  <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 shadow-xs">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                      <h3 className="text-sm font-black text-slate-900">المسمى الوظيفي الحالي</h3>
+                      {getStatusBadge(sections.title?.status || "warning")}
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 font-bold text-sm text-slate-800">
+                      {sections.title?.currentText || "غير محدد"}
+                    </div>
+
+                    <div className="mt-4 text-xs text-slate-600 leading-relaxed font-sans">
+                      <span className="font-bold text-slate-900">التحليل التشخيصي: </span>
+                      {sections.title?.analysis}
+                    </div>
                   </div>
-                </div>
-              )}
 
-              <div className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans">
-                {sections.video.analysis}
-              </div>
+                  {/* Suggestions (Arabic) */}
+                  <div className="space-y-3">
+                    <div>
+                      <h3 className="text-sm font-black text-slate-900">
+                        مسميات وظيفية مقترحة لتصدر نتائج البحث في {effectivePlatform === "nafezly" ? "نفذلي" : effectivePlatform === "khamsat" ? "خمسات" : "مستقل"}
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        صيغت هذه العناوين بناءً على الكلمات المفتاحية الأكثر بحثاً بواسطة أصحاب المشاريع
+                      </p>
+                    </div>
 
-              {/* Script Sections (Timed Breakdown) */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
-                    Timed 45-Second Video Script
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const full = sections.video.scriptSections
-                        ?.map((s) => `[${s.title}]\n${s.content}`)
-                        .join("\n\n");
-                      if (full) navigator.clipboard.writeText(full);
-                      setCopiedFullVideo(true);
-                      setTimeout(() => setCopiedFullVideo(false), 2500);
-                    }}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900"
-                  >
-                    {copiedFullVideo ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Copied Complete Script!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Copy Complete Script</span>
-                      </>
-                    )}
-                  </button>
-                </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {sections.title?.suggestions?.map((s, idx) => {
+                        const isCopied = copiedTitleIndex === idx;
+                        return (
+                          <div
+                            key={idx}
+                            className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex flex-col justify-between hover:border-slate-300 transition"
+                          >
+                            <div>
+                              <div className="text-[11px] font-black uppercase tracking-wider text-emerald-600 mb-1">
+                                {s.label}
+                              </div>
+                              <p className="text-[11px] text-slate-400 mb-3">{s.subtitle}</p>
+                              <p className="text-xs sm:text-sm font-bold text-slate-900 leading-relaxed">
+                                {s.content}
+                              </p>
+                            </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {sections.video.scriptSections?.map((sec, idx) => {
-                    const isCopied = copiedScriptIndex === idx;
-                    return (
-                      <div
-                        key={idx}
-                        className="p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between"
-                      >
-                        <div>
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-black text-slate-900">{sec.title}</span>
                             <button
                               type="button"
                               onClick={() => {
-                                navigator.clipboard.writeText(sec.content);
-                                setCopiedScriptIndex(idx);
-                                setTimeout(() => setCopiedScriptIndex(null), 2500);
+                                navigator.clipboard.writeText(s.content);
+                                setCopiedTitleIndex(idx);
+                                setTimeout(() => setCopiedTitleIndex(null), 2500);
                               }}
-                              className="p-1 rounded-md text-slate-400 hover:text-slate-700"
+                              className="mt-4 pt-3 border-t border-slate-100 inline-flex items-center justify-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 transition"
                             >
                               {isCopied ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>تم النسخ بنجاح!</span>
+                                </>
                               ) : (
-                                <Copy className="w-3.5 h-3.5" />
+                                <>
+                                  <Copy className="w-3.5 h-3.5 text-slate-400" />
+                                  <span>نسخ هذا المسمى</span>
+                                </>
                               )}
                             </button>
                           </div>
-                          <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans">
-                            {sec.content}
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
+
+            {/* ==================================================================== */}
+            {/* TAB 3: IMAGE */}
+            {/* ==================================================================== */}
+            {effectiveActiveTab === "image" && (
+              isEnglishProfile ? (
+                <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+                        <Camera className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-black text-slate-900">Profile Photo & First Impression</h3>
+                        <p className="text-xs text-slate-400">Headshot framing, eye contact, and ID verification</p>
+                      </div>
+                    </div>
+                    {getStatusBadge(sections.image?.status || "good")}
+                  </div>
+
+                  {/* Photo Preview Card */}
+                  <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 p-5 rounded-2xl bg-slate-50 border border-slate-200">
+                    <ProfileAvatar
+                      avatarUrl={avatarUrl}
+                      name={freelancerName}
+                      sizeClass="w-20 h-20"
+                      textClass="text-2xl font-black"
+                    />
+
+                    <div className="space-y-1.5 text-center sm:text-left">
+                      <div className="flex items-center justify-center sm:justify-start gap-2">
+                        <span className="text-sm font-bold text-slate-900">{freelancerName}</span>
+                        {avatarUrl && !avatarError ? (
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200 flex items-center gap-1">
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            <span>Extracted Profile Picture</span>
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-bold border border-amber-200">
+                            Default Initials (No Photo URL)
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {avatarUrl && !avatarError
+                          ? "Your actual profile photo pulled directly from your public freelance profile."
+                          : "No direct headshot URL was detected. Make sure your profile has a public portrait photo."}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans space-y-4">
+                    <p>{sections.image?.analysis}</p>
+
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+                      <h4 className="font-bold text-slate-900">Vollna Photo Checklist:</h4>
+                      <ul className="space-y-1.5 text-slate-600">
+                        <li className="flex items-center gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Face takes up 60-70% of the circular frame with clear eye contact.</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Neutral or uncluttered high-contrast background (light gray, white, or soft office).</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Complete Identity Verification (IDV) check for the blue/green verification badge.</span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+                        <Camera className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-black text-slate-900">
+                          {isKhamsat ? "الهوية البصرية وتصاميم الخدمات" : "الصورة الشخصية والانطباع الأول"}
+                        </h3>
+                        <p className="text-xs text-slate-400">
+                          {isKhamsat ? "تقييم صورة الحساب ومظهر مصغرات الخدمات لجذب المشترين" : "تأطير الوجه، الإضاءة، وتوثيق الهوية"}
+                        </p>
+                      </div>
+                    </div>
+                    {getStatusBadge(sections.image?.status || "good")}
+                  </div>
+
+                  {/* Photo Preview Card */}
+                  <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 p-5 rounded-2xl bg-slate-50 border border-slate-200">
+                    <ProfileAvatar
+                      avatarUrl={avatarUrl}
+                      name={freelancerName}
+                      sizeClass="w-20 h-20"
+                      textClass="text-2xl font-black"
+                    />
+
+                    <div className="space-y-1.5 text-center sm:text-right">
+                      <div className="flex items-center justify-center sm:justify-start gap-2">
+                        <span className="text-sm font-bold text-slate-900">{freelancerName}</span>
+                        {avatarUrl && !avatarError ? (
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200 flex items-center gap-1">
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            <span>الصورة الشخصية المعتمدة</span>
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-bold border border-amber-200">
+                            أحرف أولية (لم يتم رصد صورة شخصية مباشرة)
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {avatarUrl && !avatarError
+                          ? "تم استخراج صورتك الحالية مباشرة من صفحتك العامة على المنصة."
+                          : "تأكد من رفع صورة شخصية واضحة ومباشرة لك لتعزيز مصداقية حسابك أمام المشترين."}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans space-y-4">
+                    <p>{sections.image?.analysis}</p>
+
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+                      <h4 className="font-bold text-slate-900">معايير الصورة الناجحة للمستقل العربي:</h4>
+                      <ul className="space-y-2 text-slate-600">
+                        <li className="flex items-center gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>وضوح ملامح الوجه بنسبة 60-70% من الإطار الدائري مع ابتسامة مهنية وتواصل بصري مباشر.</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>خلفية محايدة أو مكتبية ذات إضاءة ممتازة لتعزيز الثقة الفورية لدى العميل العربي.</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>{isKhamsat ? "تصاميم مصغرات جذابة واضحة تبرز نوع الخدمة بدون نصوص كثيفة مشوهة." : "إتمام توثيق الهوية الرسمية (ID) للحصول على وسام الهوية الموثقة بجوار اسمك فوراً."}</span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
+
+            {/* ==================================================================== */}
+            {/* TAB 4: SKILLS */}
+            {/* ==================================================================== */}
+            {effectiveActiveTab === "skills" && (
+              isEnglishProfile ? (
+                <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                    <div>
+                      <h3 className="text-base font-black text-slate-900">Search Algorithm Skills & Tags</h3>
+                      <p className="text-xs text-slate-400">Optimize keywords and skill ordering to rank higher in client searches</p>
+                    </div>
+                    {getStatusBadge(sections.skills?.status || "warning")}
+                  </div>
+
+                  {/* Quick Action - Convert Suggested Skills to Project Radar Filter */}
+                  <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border border-emerald-200/90 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🎯</span>
+                        <h4 className="text-sm font-black text-slate-900">
+                          تحويل هذه المهارات إلى فلتر رادار تلقائي
+                        </h4>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          بضغطة واحدة
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed font-sans">
+                        احفظ أهم الكلمات المفتاحية المقترحة تلقائياً في صفحة فلاتر المشاريع ليتم إشعارك فوراً عبر تيليجرام عند طرح أي مشروع جديد يطابق تخصصك!
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {filterCreated && (
+                        <Link
+                          href="/filters"
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:text-slate-900 text-xs font-bold transition shadow-xs"
+                        >
+                          <span>عرض الفلاتر</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </Link>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleCreateFilterFromSkills}
+                        disabled={creatingFilter}
+                        className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition shrink-0 disabled:opacity-50"
+                      >
+                        {creatingFilter ? (
+                          <span>جاري إنشاء الفلتر...</span>
+                        ) : filterCreated ? (
+                          <>
+                            <Check className="w-4 h-4 text-white" />
+                            <span>تم تفعيل الفلتر بنجاح!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-4 h-4" />
+                            <span>🎯 تحويل هذه المهارات إلى فلتر رادار تلقائي</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Slot Utilization Bar */}
+                  <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                      <span>Skill Slots Utilization</span>
+                      <span>
+                        {skillsUsed} of {skillsMax} used ({skillsPercent}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2.5 rounded-full bg-slate-200 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${skillsUsed >= 18
+                            ? "bg-emerald-500"
+                            : skillsUsed >= 12
+                              ? "bg-amber-500"
+                              : "bg-rose-500"
+                          }`}
+                        style={{ width: `${skillsPercent}%` }}
+                      />
+                    </div>
+                    {skillsUsed < 15 && (
+                      <p className="text-[11px] text-amber-800 font-medium pt-1">
+                        ⚠️ Upwork allows up to 20 skills. Using only {skillsUsed} leaves {skillsMax - skillsUsed} valuable search keywords unused.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans">
+                    {sections.skills?.analysis}
+                  </div>
+
+                  {/* Skills to Reorder */}
+                  {sections.skills?.skillsToReorder && sections.skills.skillsToReorder.length > 0 && (
+                    <div className="p-5 rounded-2xl bg-amber-50/70 border border-amber-200/90 space-y-3">
+                      <div className="flex items-center gap-2 text-xs font-black text-amber-950 uppercase tracking-wider">
+                        <ArrowUpDown className="w-4 h-4 text-amber-600" />
+                        <span>Skills to Reorder (Prioritize in Upwork Search)</span>
+                      </div>
+                      <p className="text-xs text-amber-900 leading-relaxed font-sans">
+                        Upwork weighs your top 3-4 skills heaviest in search rankings. Reposition your core niche specializations to the top:
+                      </p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-1">
+                        {sections.skills.skillsToReorder.map((item, idx) => (
+                          <div
+                            key={idx}
+                            className="bg-white p-3.5 rounded-xl border border-amber-200 shadow-2xs flex flex-col justify-between"
+                          >
+                            <span className="text-xs font-bold text-slate-900">{item.skill}</span>
+                            <div className="flex items-center gap-2 mt-2 text-xs font-bold">
+                              <span className="text-slate-400">#{item.fromRank}</span>
+                              <span className="text-amber-500">➔</span>
+                              <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                                #{item.toRank}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recommended Skills to Add */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2.5">
+                      <h4 className="text-xs font-black text-emerald-700 uppercase tracking-wider">
+                        Recommended Skills to Add ({sections.skills?.skillsToAdd?.length || 0})
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(sections.skills?.skillsToAdd?.join(", ") || "");
+                          setCopiedSkills(true);
+                          setTimeout(() => setCopiedSkills(false), 2500);
+                        }}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900"
+                      >
+                        {copiedSkills ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Copied All!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copy All Skills</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {sections.skills?.skillsToAdd?.map((s, idx) => (
+                        <span
+                          key={idx}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-900 text-xs font-bold border border-emerald-200 flex items-center gap-1"
+                        >
+                          <Plus className="w-3 h-3 text-emerald-600" />
+                          <span>{s}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Current Skills in Order */}
+                  <div>
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2.5">
+                      Current Skills in Order ({sections.skills?.currentSkills?.length || 0})
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {sections.skills?.currentSkills?.map((s, idx) => (
+                        <span
+                          key={idx}
+                          className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-800 text-xs font-bold border border-slate-200 flex items-center gap-1.5"
+                        >
+                          <span className="text-[10px] text-slate-400 font-mono">#{idx + 1}</span>
+                          <span>{s}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                    <div>
+                      <h3 className="text-base font-black text-slate-900">المهارات والكلمات المفتاحية</h3>
+                      <p className="text-xs text-slate-400">تحسين خوارزميات البحث وتلقي دعوات المشاريع الخاصة</p>
+                    </div>
+                    {getStatusBadge(sections.skills?.status || "good")}
+                  </div>
+
+                  {/* Quick Action - Convert Suggested Skills to Project Radar Filter */}
+                  <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border border-emerald-200/90 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🎯</span>
+                        <h4 className="text-sm font-black text-slate-900">
+                          تحويل هذه المهارات إلى فلتر رادار تلقائي
+                        </h4>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          بضغطة واحدة
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed font-sans">
+                        احفظ أهم الكلمات المفتاحية المقترحة تلقائياً في صفحة فلاتر المشاريع ليتم إشعارك فوراً عبر تيليجرام عند طرح أي مشروع جديد يطابق تخصصك!
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {filterCreated && (
+                        <Link
+                          href="/filters"
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:text-slate-900 text-xs font-bold transition shadow-xs"
+                        >
+                          <span>عرض الفلاتر</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </Link>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={handleCreateFilterFromSkills}
+                        disabled={creatingFilter}
+                        className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition shrink-0 disabled:opacity-50"
+                      >
+                        {creatingFilter ? (
+                          <span>جاري إنشاء الفلتر...</span>
+                        ) : filterCreated ? (
+                          <>
+                            <Check className="w-4 h-4 text-white" />
+                            <span>تم تفعيل الفلتر بنجاح!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-4 h-4" />
+                            <span>🎯 تحويل هذه المهارات إلى فلتر رادار تلقائي</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans">
+                    {sections.skills?.analysis}
+                  </div>
+
+                  {/* Recommended Skills to Add */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2.5">
+                      <h4 className="text-xs font-black text-emerald-700 uppercase tracking-wider">
+                        مهارات مقترح إضافتها لزيادة الظهور ({sections.skills?.skillsToAdd?.length || 0})
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(sections.skills?.skillsToAdd?.join(", ") || "");
+                          setCopiedSkills(true);
+                          setTimeout(() => setCopiedSkills(false), 2500);
+                        }}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900"
+                      >
+                        {copiedSkills ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>تم نسخ المهارات!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>نسخ جميع المهارات</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {sections.skills?.skillsToAdd?.map((s, idx) => (
+                        <span
+                          key={idx}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-900 text-xs font-bold border border-emerald-200 flex items-center gap-1"
+                        >
+                          <Plus className="w-3 h-3 text-emerald-600" />
+                          <span>{s}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Current Skills in Order */}
+                  <div>
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2.5">
+                      المهارات الحالية المسجلة في حسابك ({sections.skills?.currentSkills?.length || 0})
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {sections.skills?.currentSkills?.map((s, idx) => (
+                        <span
+                          key={idx}
+                          className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-800 text-xs font-bold border border-slate-200 flex items-center gap-1.5"
+                        >
+                          <span className="text-[10px] text-slate-400 font-mono">#{idx + 1}</span>
+                          <span>{s}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
+
+            {/* ==================================================================== */}
+            {/* TAB 5: PORTFOLIO */}
+            {/* ==================================================================== */}
+            {effectiveActiveTab === "portfolio" && (
+              isEnglishProfile ? (
+                <div className="space-y-6">
+                  <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-5">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                      <div>
+                        <h3 className="text-base font-black text-slate-900">Portfolio & Case Studies</h3>
+                        <p className="text-xs text-slate-400">
+                          Current items published: {sections.portfolio?.currentCount ?? 0}
+                        </p>
+                      </div>
+                      {getStatusBadge(sections.portfolio?.status || "warning")}
+                    </div>
+
+                    {/* Alert Banner when Portfolio is 0 */}
+                    {(sections.portfolio?.currentCount ?? 0) === 0 && (
+                      <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <h4 className="text-xs font-bold text-amber-950">
+                            {sections.portfolio?.alertTitle || "No portfolio items yet"}
+                          </h4>
+                          <p className="text-xs text-amber-900/90 mt-0.5 leading-relaxed font-sans">
+                            {sections.portfolio?.alertMessage ||
+                              "Adding 2-3 strong case studies is the fastest way to increase conversion."}
                           </p>
                         </div>
                       </div>
-                    );
-                  })}
+                    )}
+
+                    {/* Project Case Study Ideas */}
+                    <div>
+                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-3">
+                        High-Converting Case Study Ideas to Add:
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {sections.portfolio?.projectIdeas?.map((p, idx) => {
+                          const isCopied = copiedPortfolioIndex === idx;
+                          return (
+                            <div
+                              key={idx}
+                              className="p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between hover:border-slate-300 transition"
+                            >
+                              <div className="space-y-2">
+                                <h5 className="font-bold text-sm text-slate-900">{p.title}</h5>
+                                <p className="text-xs text-slate-600 leading-relaxed font-sans">
+                                  {p.description}
+                                </p>
+                                {p.whyItWorks && (
+                                  <div className="pt-2 text-[11px] text-emerald-800 bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200/80 font-medium">
+                                    <span className="font-bold">Why it converts: </span>
+                                    {p.whyItWorks}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="mt-4 pt-3 border-t border-slate-200/80 flex items-center justify-between gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(`${p.title}\n\n${p.description}`);
+                                    setCopiedPortfolioIndex(idx);
+                                    setTimeout(() => setCopiedPortfolioIndex(null), 2500);
+                                  }}
+                                  className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900"
+                                >
+                                  {isCopied ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>Copied!</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>Copy Outline</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                <Link
+                                  href="/portfolio"
+                                  className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-800"
+                                >
+                                  <span>إضافة لمعرض أعمالي</span>
+                                  <ChevronRight className="w-3.5 h-3.5" />
+                                </Link>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-5">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                      <div>
+                        <h3 className="text-base font-black text-slate-900">معرض الأعمال وسابقة المشاريع</h3>
+                        <p className="text-xs text-slate-400">
+                          عدد المشاريع المنشورة حالياً في المعرض: {sections.portfolio?.currentCount ?? 0}
+                        </p>
+                      </div>
+                      {getStatusBadge(sections.portfolio?.status || "warning")}
+                    </div>
+
+                    {/* Strict Mostaql / Nafezly Alerts */}
+                    {(sections.portfolio?.currentCount ?? 0) === 0 ? (
+                      <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                        <div>
+                          <h4 className="text-xs font-bold text-rose-950">
+                            معرض أعمال فارغ (-25 نقطة فوراً!)
+                          </h4>
+                          <p className="text-xs text-rose-900/90 mt-0.5 leading-relaxed font-sans">
+                            في منصات العمل الحر العربية، العميل يدخل لمعرض الأعمال مباشرة قبل قراءة العرض! غياب المشاريع يقلل فرص فوزك بالمشاريع بنسبة تتجاوز 90%. أضف على الأقل 3 نماذج أعمال متكاملة فوراً.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (sections.portfolio?.currentCount ?? 0) < 4 ? (
+                      <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <h4 className="text-xs font-bold text-amber-950">
+                            معرض الأعمال يحتاج تعزيزاً (-12 نقطة)
+                          </h4>
+                          <p className="text-xs text-amber-900/90 mt-0.5 leading-relaxed font-sans">
+                            لديك {sections.portfolio?.currentCount} أعمال فقط. المستقلون الأكثر تعاقداً في تخصصك يمتلكون 4 إلى 8 مشاريع متنوعة توضح مهاراتهم في حل مشاكل حقيقية.
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {/* Current Published Portfolio Items */}
+                    {sections.portfolio?.currentItems && sections.portfolio.currentItems.length > 0 && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                            <Layers className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>المشاريع المستخرجة من معرض أعمالك ({sections.portfolio.currentItems.length})</span>
+                          </h4>
+                          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                            مستخرجة مباشرة
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3">
+                          {sections.portfolio.currentItems.map((item, idx) => (
+                            <div
+                              key={idx}
+                              className="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 shrink-0 font-bold text-sm">
+                                  #{idx + 1}
+                                </div>
+                                <div className="space-y-1">
+                                  <h5 className="font-bold text-xs sm:text-sm text-slate-900 leading-snug">
+                                    {item.title}
+                                  </h5>
+                                  {item.description && (
+                                    <p className="text-xs text-slate-500 line-clamp-2 font-sans">
+                                      {item.description}
+                                    </p>
+                                  )}
+                                  {item.skills && item.skills.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 pt-1">
+                                      {item.skills.map((s, sIdx) => (
+                                        <span
+                                          key={sIdx}
+                                          className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-bold"
+                                        >
+                                          {s}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {item.project_url && (
+                                <a
+                                  href={item.project_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-bold text-slate-700 hover:text-slate-900 transition self-start sm:self-auto shrink-0"
+                                >
+                                  <span>مشاهدة العمل</span>
+                                  <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                                </a>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Project Ideas for Arabic Freelancer */}
+                    <div>
+                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-3">
+                        أفكار مشاريع ودراسات حالة مقترحة لإضافتها لمعرض أعمالك فوراً:
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {sections.portfolio?.projectIdeas?.map((p, idx) => {
+                          const isCopied = copiedPortfolioIndex === idx;
+                          return (
+                            <div
+                              key={idx}
+                              className="p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between hover:border-slate-300 transition"
+                            >
+                              <div className="space-y-2">
+                                <h5 className="font-bold text-sm text-slate-900">{p.title}</h5>
+                                <p className="text-xs text-slate-600 leading-relaxed font-sans">
+                                  {p.description}
+                                </p>
+                                {p.whyItWorks && (
+                                  <div className="pt-2 text-[11px] text-emerald-800 bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200/80 font-medium">
+                                    <span className="font-bold">لماذا يجذب العميل العربي: </span>
+                                    {p.whyItWorks}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="mt-4 pt-3 border-t border-slate-200/80 flex items-center justify-between gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(`${p.title}\n\n${p.description}`);
+                                    setCopiedPortfolioIndex(idx);
+                                    setTimeout(() => setCopiedPortfolioIndex(null), 2500);
+                                  }}
+                                  className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900"
+                                >
+                                  {isCopied ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>تم النسخ!</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>نسخ خطة المشروع</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                <Link
+                                  href="/portfolio"
+                                  className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-800"
+                                >
+                                  <span>إضافة لمعرض أعمالي</span>
+                                  <ChevronLeft className="w-3.5 h-3.5" />
+                                </Link>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
+
+            {/* ==================================================================== */}
+            {/* TAB: TRUST METRICS (MOSTAQL / NAFEZLY / KHAMSAT) */}
+            {/* ==================================================================== */}
+            {effectiveActiveTab === "trust_metrics" && (
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+                      <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-slate-900">
+                        {isKhamsat ? "رتبة البائع وسرعة الرد" : "مؤشرات الثقة وسجل الإنجاز (Trust Metrics)"}
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        {isKhamsat
+                          ? "المعايير الخوارزمية للحفاظ على تقييم 5 نجوم والترقية لبائع نشيط / مميز"
+                          : "المعايير الخوارزمية التي تحدد ترتيبك وظهورك لأصحاب المشاريع في مستقل ونفذلي"}
+                      </p>
+                    </div>
+                  </div>
+                  {getStatusBadge(sections.trust_metrics?.status || "good")}
+                </div>
+
+                {/* Platform Trust Metrics Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+                  {isKhamsat ? (
+                    <>
+                      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+                        <span className="text-[11px] font-bold text-slate-400">رتبة البائع</span>
+                        <div className="text-base sm:text-lg font-black text-slate-900">
+                          {stats?.sellerLevel || "بائع جديد"}
+                        </div>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+                        <span className="text-[11px] font-bold text-slate-400">التقييم العام</span>
+                        <div className="text-base sm:text-lg font-black text-amber-600">
+                          {stats?.overallRating || "100%"}
+                        </div>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+                        <span className="text-[11px] font-bold text-slate-400">سرعة الرد</span>
+                        <div className="text-base sm:text-lg font-black text-emerald-600">
+                          {stats?.responseSpeed || "خلال ساعة"}
+                        </div>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+                        <span className="text-[11px] font-bold text-slate-400">عدد المشترين</span>
+                        <div className="text-base sm:text-lg font-black text-blue-600">
+                          {stats?.clientsCount ?? 0}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+                        <span className="text-[11px] font-bold text-slate-400">معدل إكمال المشاريع</span>
+                        <div className="text-base sm:text-lg font-black text-emerald-600">
+                          {stats?.completionRate || "100%"}
+                        </div>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+                        <span className="text-[11px] font-bold text-slate-400">التسليم في الموعد</span>
+                        <div className="text-base sm:text-lg font-black text-blue-600">
+                          {stats?.onTimeDelivery || "100%"}
+                        </div>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+                        <span className="text-[11px] font-bold text-slate-400">معدل إعادة التوظيف</span>
+                        <div className="text-base sm:text-lg font-black text-purple-600">
+                          {stats?.rehireRate || "0%"}
+                        </div>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+                        <span className="text-[11px] font-bold text-slate-400">المشاريع المنجزة</span>
+                        <div className="text-base sm:text-lg font-black text-slate-900">
+                          {stats?.completedProjects ?? 0}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Badges Card */}
+                <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                    <Award className="w-4 h-4 text-amber-500" />
+                    <span>الأوسمة وشارات الثقة الموثقة</span>
+                  </h4>
+                  {stats?.badges && stats.badges.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {stats.badges.map((b, idx) => (
+                        <span
+                          key={idx}
+                          className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800 shadow-2xs flex items-center gap-1.5"
+                        >
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>{b}</span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-amber-800 leading-relaxed font-sans bg-amber-50 p-3 rounded-xl border border-amber-200">
+                      لم يتم رصد أوسمة موثقة حتى الآن. <strong>نصيحة ذهبية:</strong> توثيق الهوية الرسمية (ID) مجاني ويمنحك وسام الهوية الموثقة فوراً، مما يضاعف ثقة أصحاب المشاريع ثلاث مرات.
+                    </p>
+                  )}
+                </div>
+
+                {/* Diagnosis Analysis */}
+                <div className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans">
+                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider mb-2">
+                    التحليل التشخيصي لمؤشرات الثقة:
+                  </h4>
+                  <p>{sections.trust_metrics?.analysis}</p>
+                </div>
+
+                {/* Actionable Tips */}
+                {sections.trust_metrics?.tips && sections.trust_metrics.tips.length > 0 && (
+                  <div className="p-5 rounded-2xl bg-emerald-50/70 border border-emerald-200/90 space-y-3">
+                    <h4 className="text-xs font-black text-emerald-950 uppercase tracking-wider flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-emerald-600" />
+                      <span>خطة العمل لرفع مؤشرات الثقة والأوسمة:</span>
+                    </h4>
+                    <ul className="space-y-2 text-xs text-emerald-900">
+                      {sections.trust_metrics.tips.map((tip, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                          <span className="leading-relaxed">{tip}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ==================================================================== */}
+            {/* TAB: GIGS (KHAMSAT SPECIFIC) */}
+            {/* ==================================================================== */}
+            {effectiveActiveTab === "gigs" && (
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+                      <ShoppingBag className="w-5 h-5 text-amber-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-slate-900">الخدمات المصغرة المنشورة (Gigs)</h3>
+                      <p className="text-xs text-slate-400">
+                        الخدمات النشطة حالياً: {sections.gigs?.currentCount ?? stats?.activeServicesCount ?? 0}
+                      </p>
+                    </div>
+                  </div>
+                  {getStatusBadge(sections.gigs?.status || "warning")}
+                </div>
+
+                <div className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans">
+                  <p>{sections.gigs?.analysis}</p>
+                </div>
+
+                {/* Suggested Gigs in Khamsat Format */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                        3 خدمات جديدة مقترحة بصيغة خمسات المعتمدة (&quot;سأقوم بـ...&quot;)
+                      </h4>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        عناوين وأوصاف مخصصة للتصدر في تصنيفات خمسات الأكثر طلباً
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {sections.gigs?.suggestedGigs?.map((gig, idx) => {
+                      const isCopied = copiedGigIndex === idx;
+                      return (
+                        <div
+                          key={idx}
+                          className="p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between hover:border-slate-300 transition"
+                        >
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 text-[10px] font-bold border border-amber-200">
+                                {gig.category || "خدمات احترافية"}
+                              </span>
+                              <span className="text-xs font-black text-emerald-600">
+                                {gig.price || "5$"}
+                              </span>
+                            </div>
+
+                            <h5 className="font-bold text-sm text-slate-900 leading-snug">
+                              {gig.title}
+                            </h5>
+
+                            <p className="text-xs text-slate-600 leading-relaxed font-sans">
+                              {gig.description}
+                            </p>
+
+                            {gig.whyItSells && (
+                              <div className="text-[11px] text-emerald-800 bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200/80 font-medium leading-relaxed">
+                                <span className="font-bold">سر المبيعات: </span>
+                                {gig.whyItSells}
+                              </div>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleCopyGig(gig, idx)}
+                            className="mt-4 pt-3 border-t border-slate-200/80 inline-flex items-center justify-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 transition"
+                          >
+                            {isCopied ? (
+                              <>
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>تم نسخ تفاصيل الخدمة!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3.5 h-3.5 text-slate-400" />
+                                <span>نسخ عنوان ووصف الخدمة</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* ==================================================================== */}
-          {/* TAB 8: CATALOG */}
-          {/* ==================================================================== */}
-          {activeTab === "catalog" && (
-            <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
-                    <ShoppingBag className="w-5 h-5" />
+            {/* ==================================================================== */}
+            {/* TAB: UPSELLS (KHAMSAT SPECIFIC) */}
+            {/* ==================================================================== */}
+            {effectiveActiveTab === "upsells" && (
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+                      <TrendingUp className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-slate-900">تطويرات الخدمات الذكية (Upsells)</h3>
+                      <p className="text-xs text-slate-400">
+                        استراتيجيات رفع متوسط قيمة الطلب من 5$ إلى 50$+ لكل عميل
+                      </p>
+                    </div>
                   </div>
+                  {getStatusBadge(sections.upsells?.status || "warning")}
+                </div>
+
+                <div className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans">
+                  <p>{sections.upsells?.analysis}</p>
+                </div>
+
+                {/* Upsell Tiers List */}
+                <div className="space-y-5">
+                  {sections.upsells?.strategies?.map((strat, sIdx) => (
+                    <div
+                      key={sIdx}
+                      className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4"
+                    >
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-3">
+                        <h4 className="text-xs font-black text-slate-900">
+                          الخدمة المستهدفة: <span className="text-emerald-700">{strat.gigTitle}</span>
+                        </h4>
+                        <span className="text-[11px] font-bold text-slate-500">
+                          السعر الأساسي: {strat.basePrice}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {strat.upsellTiers?.map((tier, tIdx) => {
+                          const isCopied = copiedUpsellIndex === sIdx * 10 + tIdx;
+                          return (
+                            <div
+                              key={tIdx}
+                              className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between shadow-2xs"
+                            >
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-xs font-black text-slate-900">{tier.addon}</span>
+                                  <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-xs font-black border border-emerald-200">
+                                    +{tier.extraPrice}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 block font-medium">
+                                  المدة الإضافية: +{tier.extraDays}
+                                </span>
+                                <p className="text-xs text-slate-600 leading-relaxed font-sans">
+                                  {tier.pitch}
+                                </p>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => handleCopyUpsell(tier, sIdx * 10 + tIdx)}
+                                className="mt-3 pt-2.5 border-t border-slate-100 inline-flex items-center justify-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900"
+                              >
+                                {isCopied ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>تم النسخ!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3.5 h-3.5 text-slate-400" />
+                                    <span>نسخ نص التطوير</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ==================================================================== */}
+            {/* TAB 6: EXPERIENCE (UPWORK ONLY) */}
+            {/* ==================================================================== */}
+            {effectiveActiveTab === "experience" && isEnglishProfile && (
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
                   <div>
-                    <h3 className="text-base font-black text-slate-900">Project Catalog Offerings</h3>
-                    <p className="text-xs text-slate-400">Current catalog projects: {sections.catalog.currentCount}</p>
+                    <h3 className="text-base font-black text-slate-900">Employment History & Credentials</h3>
+                    <p className="text-xs text-slate-400">Position past roles with client-facing keywords and measurable outcomes</p>
                   </div>
+                  {getStatusBadge(sections.experience?.status || "warning")}
                 </div>
-                {getStatusBadge(sections.catalog.status)}
-              </div>
 
-              {/* Info Banner */}
-              <div className="p-4 rounded-2xl bg-slate-100/70 border border-slate-200/80 text-xs text-slate-600 flex items-start sm:items-center gap-3">
-                <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5 sm:mt-0" />
-                <p className="leading-relaxed">
-                  {sections.catalog.infoBanner ||
-                    "Catalogs surface your profile on Upwork's product listing page, a second entry point for views, messages, and invites."}
-                </p>
-              </div>
-
-              {/* Alert Banner when Catalog is 0 */}
-              {sections.catalog.currentCount === 0 && (
+                {/* Alert Banner */}
                 <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 flex items-start gap-3">
                   <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                   <div>
                     <h4 className="text-xs font-bold text-amber-950">
-                      {sections.catalog.alertTitle || "No catalog projects yet"}
+                      {sections.experience?.alertTitle || "Attention needed"}
                     </h4>
                     <p className="text-xs text-amber-900/90 mt-0.5 leading-relaxed font-sans">
-                      {sections.catalog.alertMessage ||
-                        "Adding one or two is a quick win. Start with a project idea below."}
+                      {sections.experience?.alertMessage}
                     </p>
                   </div>
                 </div>
-              )}
 
-              {/* Project Ideas */}
-              <div className="space-y-3">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
-                  Productized Project Ideas to Launch:
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {sections.catalog.projectIdeas?.map((item, idx) => {
-                    const isCopied = copiedCatalogIndex === idx;
-                    return (
-                      <div
-                        key={idx}
-                        className="p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between hover:border-slate-300 transition"
-                      >
-                        <div className="space-y-2">
-                          <h5 className="font-bold text-sm text-slate-900">{item.title}</h5>
-                          <p className="text-xs text-slate-600 leading-relaxed font-sans">
-                            {item.description}
-                          </p>
-                          {item.rationale && (
-                            <div className="pt-2 text-[11px] text-emerald-800 bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200/80 font-medium">
-                              <span className="font-bold">Rationale: </span>
-                              {item.rationale}
+                {/* Employment History Note */}
+                {sections.experience?.employmentHistoryNote && (
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-700 leading-relaxed font-sans">
+                    <span className="font-bold text-slate-900">Profile Diagnosis: </span>
+                    {sections.experience.employmentHistoryNote}
+                  </div>
+                )}
+
+                {/* Employment Rewrites */}
+                {sections.experience?.employmentRewrites && sections.experience.employmentRewrites.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
+                      Recommended Role Rewrites
+                    </h4>
+                    <div className="space-y-4">
+                      {sections.experience.employmentRewrites.map((r, idx) => {
+                        const isTitleCopied = copiedRewriteTitleIndex === idx;
+                        const isDescCopied = copiedRewriteDescIndex === idx;
+
+                        return (
+                          <div
+                            key={idx}
+                            className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4"
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-200/80">
+                              <div>
+                                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                                  Current:
+                                </span>
+                                <span className="ml-2 font-bold text-xs text-slate-700">
+                                  {r.currentRole} at {r.company}
+                                </span>
+                              </div>
+                              <span className="text-[11px] text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 font-bold self-start sm:self-auto">
+                                High-Leverage Signal
+                              </span>
                             </div>
-                          )}
-                        </div>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(`${item.title}\n\n${item.description}`);
-                            setCopiedCatalogIndex(idx);
-                            setTimeout(() => setCopiedCatalogIndex(null), 2500);
-                          }}
-                          className="mt-4 pt-3 border-t border-slate-200/80 inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900"
+                            {/* Recommended Title */}
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-900">Recommended Title:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(r.recommendedTitle);
+                                    setCopiedRewriteTitleIndex(idx);
+                                    setTimeout(() => setCopiedRewriteTitleIndex(null), 2500);
+                                  }}
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-slate-900"
+                                >
+                                  {isTitleCopied ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>Copied!</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>Copy Title</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                              <div className="p-3 bg-white rounded-xl border border-slate-200 text-xs font-bold text-slate-900 dir-ltr text-left">
+                                {r.recommendedTitle}
+                              </div>
+                            </div>
+
+                            {/* Recommended Description */}
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-900">Recommended Description:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(r.recommendedDescription);
+                                    setCopiedRewriteDescIndex(idx);
+                                    setTimeout(() => setCopiedRewriteDescIndex(null), 2500);
+                                  }}
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 hover:text-slate-900"
+                                >
+                                  {isDescCopied ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>Copied!</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>Copy Description</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                              <div className="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed font-sans whitespace-pre-wrap dir-ltr text-left">
+                                {r.recommendedDescription}
+                              </div>
+                            </div>
+
+                            {/* Why it works */}
+                            {r.whyItWorks && (
+                              <div className="text-[11px] text-slate-500 leading-relaxed font-sans">
+                                <span className="font-bold text-slate-700">Rationale: </span>
+                                {r.whyItWorks}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Roles to Add */}
+                {sections.experience?.rolesToAdd && sections.experience.rolesToAdd.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
+                      Role Ideas to Add (Fill Entry Gaps)
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {sections.experience.rolesToAdd.map((role, idx) => (
+                        <div key={idx} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5">
+                          <h5 className="font-bold text-xs text-slate-900">{role.title}</h5>
+                          <p className="text-xs text-slate-600 leading-relaxed font-sans">
+                            {role.description}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Suggested Additions */}
+                {sections.experience?.suggestedAdditions && sections.experience.suggestedAdditions.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
+                      High-Value Credentials & Proof Points
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {sections.experience.suggestedAdditions.map((item, idx) => (
+                        <div
+                          key={idx}
+                          className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between"
                         >
-                          {isCopied ? (
-                            <>
-                              <Check className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>Copied!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3.5 h-3.5 text-slate-400" />
-                              <span>Copy Package Details</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    );
-                  })}
+                          <div>
+                            <span className="inline-block px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold uppercase mb-2">
+                              {item.type}
+                            </span>
+                            <h5 className="font-bold text-xs text-slate-900 mb-1">{item.title}</h5>
+                            <p className="text-xs text-slate-600 leading-relaxed font-sans">
+                              {item.description}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ==================================================================== */}
+            {/* TAB 7: VIDEO (UPWORK ONLY) */}
+            {/* ==================================================================== */}
+            {effectiveActiveTab === "video" && isEnglishProfile && (
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+                      <Video className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-slate-900">45-Second Introduction Video</h3>
+                      <p className="text-xs text-slate-400">Profiles with an intro video receive up to 3x more invites</p>
+                    </div>
+                  </div>
+                  {getStatusBadge(sections.video?.status || "warning")}
+                </div>
+
+                {/* Video Status Banner */}
+                {!sections.video?.hasVideo ? (
+                  <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-xs font-bold text-amber-950">No video introduction found (-5 pts)</h4>
+                      <p className="text-xs text-amber-900/90 mt-0.5 leading-relaxed font-sans">
+                        A short 45-second headshot video dramatically boosts client trust and helps overcome lack of review history.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-200 flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-xs font-bold text-emerald-950">Video introduction present (+5 pts)</h4>
+                      <p className="text-xs text-emerald-900/90 mt-0.5 leading-relaxed font-sans">
+                        Great job having a video introduction! Review the script below to optimize your delivery.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans">
+                  {sections.video?.analysis}
+                </div>
+
+                {/* Script Sections */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
+                      Timed 45-Second Video Script
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const full = sections.video?.scriptSections
+                          ?.map((s) => `[${s.title}]\n${s.content}`)
+                          .join("\n\n");
+                        if (full) navigator.clipboard.writeText(full);
+                        setCopiedFullVideo(true);
+                        setTimeout(() => setCopiedFullVideo(false), 2500);
+                      }}
+                      className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900"
+                    >
+                      {copiedFullVideo ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Copied Complete Script!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Copy Complete Script</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {sections.video?.scriptSections?.map((sec, idx) => {
+                      const isCopied = copiedScriptIndex === idx;
+                      return (
+                        <div
+                          key={idx}
+                          className="p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-black text-slate-900">{sec.title}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(sec.content);
+                                  setCopiedScriptIndex(idx);
+                                  setTimeout(() => setCopiedScriptIndex(null), 2500);
+                                }}
+                                className="p-1 rounded-md text-slate-400 hover:text-slate-700"
+                              >
+                                {isCopied ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                            <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-sans">
+                              {sec.content}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+
+            {/* ==================================================================== */}
+            {/* TAB 8: CATALOG (UPWORK ONLY) */}
+            {/* ==================================================================== */}
+            {effectiveActiveTab === "catalog" && isEnglishProfile && (
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+                      <ShoppingBag className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-slate-900">Project Catalog Offerings</h3>
+                      <p className="text-xs text-slate-400">Current catalog projects: {sections.catalog?.currentCount ?? 0}</p>
+                    </div>
+                  </div>
+                  {getStatusBadge(sections.catalog?.status || "warning")}
+                </div>
+
+                {/* Info Banner */}
+                <div className="p-4 rounded-2xl bg-slate-100/70 border border-slate-200/80 text-xs text-slate-600 flex items-start sm:items-center gap-3">
+                  <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5 sm:mt-0" />
+                  <p className="leading-relaxed">
+                    {sections.catalog?.infoBanner ||
+                      "Catalogs surface your profile on Upwork's product listing page, a second entry point for views, messages, and invites."}
+                  </p>
+                </div>
+
+                {/* Alert Banner when Catalog is 0 */}
+                {(sections.catalog?.currentCount ?? 0) === 0 && (
+                  <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-xs font-bold text-amber-950">
+                        {sections.catalog?.alertTitle || "No catalog projects yet"}
+                      </h4>
+                      <p className="text-xs text-amber-900/90 mt-0.5 leading-relaxed font-sans">
+                        {sections.catalog?.alertMessage ||
+                          "Adding one or two is a quick win. Start with a project idea below."}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Project Ideas */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
+                    Productized Project Ideas to Launch:
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {sections.catalog?.projectIdeas?.map((item, idx) => {
+                      const isCopied = copiedCatalogIndex === idx;
+                      return (
+                        <div
+                          key={idx}
+                          className="p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between hover:border-slate-300 transition"
+                        >
+                          <div className="space-y-2">
+                            <h5 className="font-bold text-sm text-slate-900">{item.title}</h5>
+                            <p className="text-xs text-slate-600 leading-relaxed font-sans">
+                              {item.description}
+                            </p>
+                            {item.rationale && (
+                              <div className="pt-2 text-[11px] text-emerald-800 bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200/80 font-medium">
+                                <span className="font-bold">Rationale: </span>
+                                {item.rationale}
+                              </div>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(`${item.title}\n\n${item.description}`);
+                              setCopiedCatalogIndex(idx);
+                              setTimeout(() => setCopiedCatalogIndex(null), 2500);
+                            }}
+                            className="mt-4 pt-3 border-t border-slate-200/80 inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900"
+                          >
+                            {isCopied ? (
+                              <>
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3.5 h-3.5 text-slate-400" />
+                                <span>Copy Package Details</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Sync Confirmation Modal */}
@@ -1903,11 +2938,10 @@ export default function ProfileAuditPage() {
             <button
               type="button"
               onClick={() => setActiveInputTab("upwork_url")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                activeInputTab === "upwork_url"
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${activeInputTab === "upwork_url"
                   ? "bg-slate-900 text-white shadow-xs"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
+                }`}
             >
               <Globe className="w-3.5 h-3.5 text-emerald-400" />
               <span>Upwork (رابط البروفايل)</span>
@@ -1919,11 +2953,10 @@ export default function ProfileAuditPage() {
             <button
               type="button"
               onClick={() => setActiveInputTab("platform_url")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                activeInputTab === "platform_url"
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${activeInputTab === "platform_url"
                   ? "bg-slate-900 text-white shadow-xs"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
+                }`}
             >
               <Globe className="w-3.5 h-3.5" />
               <span>مستقل / خمسات / نفذلي</span>
@@ -1932,11 +2965,10 @@ export default function ProfileAuditPage() {
             <button
               type="button"
               onClick={() => setActiveInputTab("raw_text")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                activeInputTab === "raw_text"
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${activeInputTab === "raw_text"
                   ? "bg-slate-900 text-white shadow-xs"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
+                }`}
             >
               <ClipboardList className="w-3.5 h-3.5" />
               <span>نص خام</span>
@@ -1945,11 +2977,10 @@ export default function ProfileAuditPage() {
             <button
               type="button"
               onClick={() => setActiveInputTab("current_profile")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                activeInputTab === "current_profile"
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${activeInputTab === "current_profile"
                   ? "bg-slate-900 text-white shadow-xs"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
+                }`}
             >
               <User className="w-3.5 h-3.5" />
               <span>بروفايلي الحالي في PingLead</span>
@@ -2088,3 +3119,4 @@ export default function ProfileAuditPage() {
     </div>
   );
 }
+

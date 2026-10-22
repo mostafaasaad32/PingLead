@@ -60,15 +60,10 @@ export async function GET(req: NextRequest) {
     if (error) throw error;
 
     const trackedItems = (data || []).map((item: any) => {
-      // If item was auto-created by ingestion filter match and hasn't been explicitly bookmarked
+      // A project is ONLY 'saved' if the user explicitly clicked save (notes === 'user_saved')
       let effectiveStatus = item.status;
-      if (
-        effectiveStatus === "saved" &&
-        item.matched_filter_id &&
-        item.notes !== "user_saved" &&
-        !item.generated_proposal
-      ) {
-        effectiveStatus = "matched";
+      if (effectiveStatus === "saved" && item.notes !== "user_saved") {
+        effectiveStatus = "ignored";
       }
 
       return {
@@ -91,28 +86,24 @@ export async function GET(req: NextRequest) {
       };
     });
 
+    // Filter by effective status if requested
+    const filteredItems =
+      statusFilter === "all"
+        ? trackedItems
+        : trackedItems.filter((i) => i.status === statusFilter);
+
     // Calculate real CRM metrics
-    const totalCount = trackedItems.length;
-    // Funnel stages imply the earlier ones: replied/won projects were applied to
-    const appliedCount = trackedItems.filter((i) => ["applied", "replied", "won"].includes(i.status)).length;
-    const repliedCount = trackedItems.filter((i) => ["replied", "won"].includes(i.status)).length;
-    const wonCount = trackedItems.filter((i) => i.status === "won").length;
     const savedCount = trackedItems.filter((i) => i.status === "saved").length;
-    const matchedCount = trackedItems.filter((i) => i.status === "matched").length;
     const proposalsCount = trackedItems.filter((i) => Boolean(i.generated_proposal)).length;
+    const totalCount = trackedItems.length;
 
     return NextResponse.json({
       ok: true,
-      items: trackedItems,
+      items: filteredItems,
       metrics: {
         total: totalCount,
-        matched: matchedCount,
-        applied: appliedCount,
-        replied: repliedCount,
-        won: wonCount,
         saved: savedCount,
         proposals_generated: proposalsCount,
-        conversion_rate: totalCount > 0 ? Math.round((appliedCount / totalCount) * 100) : 0,
       },
     });
   } catch (err: any) {
@@ -154,8 +145,10 @@ export async function POST(req: NextRequest) {
       updated_at: new Date().toISOString(),
     };
 
-    if (targetStatus === "saved" && notes === undefined) {
-      payload.notes = "user_saved";
+    if (targetStatus === "saved") {
+      payload.notes = notes || "user_saved";
+    } else if (targetStatus === "ignored") {
+      payload.notes = null;
     } else if (notes !== undefined) {
       payload.notes = notes;
     }

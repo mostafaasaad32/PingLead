@@ -10,12 +10,13 @@ import dns from "node:dns";
 // Force IPv4 first in Node.js to prevent 30-second IPv6 connection timeouts on Windows
 try {
   dns.setDefaultResultOrder("ipv4first");
-} catch {}
+} catch { }
 
 export interface ExtractedPortfolioItem {
   title: string;
   description: string;
   project_url?: string | null;
+  imageUrl?: string | null;
   skills: string[];
   category?: string;
 }
@@ -47,6 +48,32 @@ export interface ExtractedProfileData {
   }>;
   hasVideo?: boolean;
   avatarUrl?: string;
+  platformType?: "upwork" | "mostaql" | "nafezly" | "khamsat" | "freelancer" | "github" | "pinglead" | "custom";
+  sourceUrl?: string;
+  stats?: {
+    totalJobs?: string | number;
+    totalHours?: string | number;
+    hourlyRate?: string;
+    activeContracts?: string[];
+    completionRate?: string;
+    rehireRate?: string;
+    onTimeDelivery?: string;
+    responseSpeed?: string;
+    completedProjects?: string | number;
+    portfolioCount?: number;
+    sellerLevel?: string;
+    overallRating?: string | number;
+    clientsCount?: string | number;
+    badges?: string[];
+    activeServicesCount?: number;
+  };
+  gigs?: Array<{
+    title: string;
+    price?: string;
+    salesCount?: string | number;
+    rating?: string | number;
+    url?: string;
+  }>;
 }
 
 export type VollnaSectionStatus = "good" | "warning" | "critical";
@@ -103,6 +130,7 @@ export interface VollnaAuditPortfolioSection {
   currentCount: number;
   alertTitle: string;
   alertMessage: string;
+  currentItems?: ExtractedPortfolioItem[];
   projectIdeas: Array<{
     title: string;
     description: string;
@@ -156,6 +184,49 @@ export interface VollnaAuditCatalogSection {
   }>;
 }
 
+export interface VollnaAuditTrustMetricsSection {
+  status: VollnaSectionStatus;
+  analysis: string;
+  badges: string[];
+  metrics: Array<{
+    name: string;
+    currentValue: string;
+    targetValue: string;
+    impact: string;
+  }>;
+  tips: string[];
+}
+
+export interface VollnaAuditGigsSection {
+  status: VollnaSectionStatus;
+  analysis: string;
+  currentCount: number;
+  currentGigs?: Array<{ title: string; price?: string }>;
+  suggestedGigs: Array<{
+    title: string;
+    category: string;
+    price: string;
+    deliveryTime: string;
+    description: string;
+    whyItSells: string;
+  }>;
+}
+
+export interface VollnaAuditUpsellsSection {
+  status: VollnaSectionStatus;
+  analysis: string;
+  strategies: Array<{
+    gigTitle: string;
+    basePrice: string;
+    upsellTiers: Array<{
+      addon: string;
+      extraPrice: string;
+      extraDays: string;
+      pitch: string;
+    }>;
+  }>;
+}
+
 export interface VollnaProfileAuditResult {
   freelancerName: string;
   currentTitle: string;
@@ -167,7 +238,24 @@ export interface VollnaProfileAuditResult {
     totalHours?: string | number;
     hourlyRate?: string;
     activeContracts?: string[];
+    completionRate?: string;
+    rehireRate?: string;
+    onTimeDelivery?: string;
+    responseSpeed?: string;
+    completedProjects?: string | number;
+    portfolioCount?: number;
+    sellerLevel?: string;
+    overallRating?: string | number;
+    clientsCount?: string | number;
+    badges?: string[];
+    activeServicesCount?: number;
   };
+  platformStats?: Array<{
+    label: string;
+    value: string | number;
+    icon?: string;
+    color?: string;
+  }>;
   sections: {
     title: VollnaAuditTitleSection;
     image: VollnaAuditImageSection;
@@ -177,8 +265,12 @@ export interface VollnaProfileAuditResult {
     experience: VollnaAuditExperienceSection;
     video: VollnaAuditVideoSection;
     catalog: VollnaAuditCatalogSection;
+    trust_metrics?: VollnaAuditTrustMetricsSection;
+    gigs?: VollnaAuditGigsSection;
+    upsells?: VollnaAuditUpsellsSection;
   };
   platform?: string;
+  platformType?: "upwork" | "mostaql" | "nafezly" | "khamsat" | "freelancer" | "github" | "pinglead" | "custom";
   auditUrl?: string;
   auditedAt?: string;
 }
@@ -446,17 +538,20 @@ export async function extractProfileFromUrl(
 
   // 1. Mostaql (mostaql.com/u/username)
   if (lowerUrl.includes("mostaql.com/")) {
-    return scrapeMostaql(trimmedUrl);
+    const { scrapeMostaqlProfile } = await import("./profile-fetcher");
+    return scrapeMostaqlProfile(trimmedUrl);
   }
 
   // 2. Khamsat (khamsat.com/user/username)
   if (lowerUrl.includes("khamsat.com/user/")) {
-    return scrapeKhamsat(trimmedUrl);
+    const { scrapeKhamsatProfile } = await import("./profile-fetcher");
+    return scrapeKhamsatProfile(trimmedUrl);
   }
 
   // 3. Nafathly (nafezly.com/u/username)
   if (lowerUrl.includes("nafezly.com/u/")) {
-    return scrapeNafezly(trimmedUrl);
+    const { scrapeNafezlyProfile } = await import("./profile-fetcher");
+    return scrapeNafezlyProfile(trimmedUrl);
   }
 
   // 4. GitHub (github.com/username)
@@ -674,6 +769,124 @@ export function calculateVollnaDeterministicScore(data: {
 }
 
 /**
+ * Strict Deterministic Scoring Algorithm for Mostaql & Nafezly
+ * 1. Arabic Portfolio (30 pts): 0 items = -25 pts, < 4 items = -12 pts, 4+ = 30 pts.
+ * 2. Persuasive Bio & Structure (25 pts): Arab client-centric, Hook, Value, Proof.
+ * 3. Trust Metrics & Badges (20 pts): Completion >= 95%, rehire, verified badge.
+ * 4. Job Title & Search Intent (15 pts): Clear niche focus.
+ * 5. Skills & Avatar (10 pts): 5+ skills (5 pts) + Photo (5 pts).
+ */
+export function calculateMostaqlDeterministicScore(data: {
+  portfolioCount: number;
+  completionRate?: string;
+  rehireRate?: string;
+  badges?: string[];
+  skillsCount: number;
+  bio: string;
+  headline: string;
+  hasAvatar: boolean;
+}): number {
+  // 1. Arabic Portfolio (30 pts)
+  let portfolioScore = 30;
+  if (data.portfolioCount === 0) {
+    portfolioScore = 5; // Deduct 25 pts immediately
+  } else if (data.portfolioCount < 4) {
+    portfolioScore = 18; // Deduct 12 pts
+  } else {
+    portfolioScore = 30;
+  }
+
+  // 2. Persuasive Bio & Structure (25 pts)
+  let bioScore = 24;
+  const lowerBio = (data.bio || "").trim();
+  if (
+    lowerBio.startsWith("أنا ") ||
+    lowerBio.startsWith("اسمي ") ||
+    lowerBio.startsWith("مهندس ") ||
+    lowerBio.startsWith("مستقل ") ||
+    lowerBio.startsWith("أعمل كـ") ||
+    lowerBio.length < 150
+  ) {
+    bioScore -= 8;
+  }
+  if (lowerBio.length < 400) {
+    bioScore -= 3;
+  }
+
+  // 3. Trust Metrics & Badges (20 pts)
+  let trustScore = 18;
+  const compNum = parseInt((data.completionRate || "100").replace(/[^0-9]/g, ""), 10) || 100;
+  if (compNum < 80) trustScore -= 7;
+  else if (compNum < 95) trustScore -= 3;
+
+  const hasVerifiedBadge = (data.badges || []).some(
+    (b) => b.includes("موثقة") || b.includes("ملتزم") || b.includes("متميز")
+  );
+  if (!hasVerifiedBadge) trustScore -= 5;
+
+  // 4. Job Title & Keywords (15 pts)
+  let titleScore = 14;
+  const title = (data.headline || "").trim();
+  if (!title || title.length < 5 || title.includes("مستقل مسجل")) {
+    titleScore = 8;
+  } else if (title.includes("|") && title.length > 40) {
+    titleScore = 12;
+  }
+
+  // 5. Skills & Avatar (10 pts)
+  let skillsAvatarScore = 0;
+  if (data.skillsCount >= 5) skillsAvatarScore += 5;
+  else if (data.skillsCount >= 2) skillsAvatarScore += 3;
+  else skillsAvatarScore += 1;
+
+  if (data.hasAvatar) skillsAvatarScore += 5;
+  else skillsAvatarScore += 2;
+
+  const total = Math.min(
+    100,
+    Math.max(15, portfolioScore + bioScore + trustScore + titleScore + skillsAvatarScore)
+  );
+  return total;
+}
+
+/**
+ * Strict Deterministic Scoring Algorithm for Khamsat Micro-Services
+ * 1. Services & Gigs Quality (35 pts): 0 gigs = 5 pts, 1 gig = 18 pts, 2 = 26 pts, 3+ = 35 pts.
+ * 2. Upsells & Order Value (25 pts): Ability to raise order value above $5.
+ * 3. Bio & Seller Trust (20 pts): Client reassurance & guarantees.
+ * 4. Seller Rank & Response Speed (20 pts): Level (مميز/موثوق/نشيط/جديد) + response rate.
+ */
+export function calculateKhamsatDeterministicScore(data: {
+  gigsCount: number;
+  sellerLevel?: string;
+  responseSpeed?: string;
+  bio: string;
+  hasAvatar: boolean;
+}): number {
+  // 1. Services & Gigs (35 pts)
+  let gigsScore = 35;
+  if (data.gigsCount === 0) gigsScore = 5;
+  else if (data.gigsCount === 1) gigsScore = 18;
+  else if (data.gigsCount === 2) gigsScore = 26;
+
+  // 2. Upsells & Order Value (25 pts)
+  let upsellsScore = data.gigsCount >= 2 ? 23 : 15;
+
+  // 3. Bio & Seller Trust (20 pts)
+  let bioScore = data.bio && data.bio.length > 100 ? 18 : 10;
+
+  // 4. Seller Rank & Response Speed (20 pts)
+  let rankScore = 12;
+  const level = data.sellerLevel || "بائع جديد";
+  if (level.includes("مميز") || level.includes("موثوق")) rankScore = 20;
+  else if (level.includes("نشيط")) rankScore = 16;
+  else rankScore = 10;
+
+  const total = Math.min(100, Math.max(20, gigsScore + upsellsScore + bioScore + rankScore));
+  return total;
+}
+
+/**
  * Clean Upwork markdown by removing mega navigation menu without dropping bottom profile sections
  */
 function cleanUpworkMarkdown(text: string): string {
@@ -708,7 +921,7 @@ function isUpworkProfileLocked(text: string): boolean {
     text.includes("only available to Upwork customers") ||
     text.includes("Please login or sign up to view their profile") ||
     text.includes("This freelancer's profile is only available");
-  
+
   const hasProfileContent =
     text.includes("#### About") ||
     text.includes("#### Skills") ||
@@ -790,7 +1003,7 @@ async function scrapeUpwork(url: string): Promise<ExtractedProfileData> {
           content = $("body").text().replace(/\s+/g, " ").trim();
         }
       }
-    } catch {}
+    } catch { }
   }
 
   if (isLoginRequired) {
@@ -869,7 +1082,7 @@ async function scrapeMostaql(url: string): Promise<ExtractedProfileData> {
       const text = await profRes.text();
       if (text.length > 500) profileHtml = text;
     }
-  } catch {}
+  } catch { }
 
   const sourceHtml = portfolioHtml && portfolioHtml.length > 500 ? portfolioHtml : profileHtml;
 
@@ -885,7 +1098,7 @@ async function scrapeMostaql(url: string): Promise<ExtractedProfileData> {
           return extractProfileFromRawText(`Platform: Mostaql\n${text}`);
         }
       }
-    } catch {}
+    } catch { }
 
     throw new Error("تعذر جلب صفحة بروفايل مستقل. يرجى التأكد من صحة الرابط أو رفع ملف PDF أو لصق النص يدوياً.");
   }
@@ -1058,7 +1271,7 @@ async function scrapeKhamsat(url: string): Promise<ExtractedProfileData> {
         headers: { Accept: "text/plain" },
       });
       if (jinaRes.ok) html = await jinaRes.text();
-    } catch {}
+    } catch { }
   }
 
   let textContext = "";
@@ -1125,7 +1338,7 @@ async function scrapeNafezly(url: string): Promise<ExtractedProfileData> {
     try {
       const jinaRes = await fetch(`https://r.jina.ai/${profileUrl}`);
       if (jinaRes.ok) html = await jinaRes.text();
-    } catch {}
+    } catch { }
   }
 
   let textContext = "";
@@ -1199,12 +1412,12 @@ Company: ${userJson.company || ""}
 Blog / Website: ${userJson.blog || ""}
 Top Public Repositories (Portfolio Projects):
 ${reposJson
-  .filter((r) => !r.fork)
-  .map(
-    (r, i) =>
-      `${i + 1}. Title: ${r.name}\n   Description: ${r.description || "No description"}\n   Stars: ${r.stargazers_count}\n   Language: ${r.language || ""}\n   URL: ${r.html_url}`
-  )
-  .join("\n\n")}
+        .filter((r) => !r.fork)
+        .map(
+          (r, i) =>
+            `${i + 1}. Title: ${r.name}\n   Description: ${r.description || "No description"}\n   Stars: ${r.stargazers_count}\n   Language: ${r.language || ""}\n   URL: ${r.html_url}`
+        )
+        .join("\n\n")}
 `.trim();
 
     const result = await extractProfileFromRawText(rawContext);
@@ -1224,7 +1437,7 @@ ${reposJson
       if (ghAvatar) result.avatarUrl = ghAvatar;
       return result;
     }
-  } catch {}
+  } catch { }
 
   throw new Error("تعذر قراءة بيانات حساب GitHub. يرجى التحقق من صحة الرابط.");
 }
@@ -1242,13 +1455,13 @@ async function scrapeGenericUrl(url: string): Promise<ExtractedProfileData> {
       $("script, style, noscript, nav, footer").remove();
       content = $("body").text().replace(/\s+/g, " ").trim().slice(0, 6000);
     }
-  } catch {}
+  } catch { }
 
   if (!content || content.length < 100) {
     try {
       const jina = await fetch(`https://r.jina.ai/${url}`);
       if (jina.ok) content = await jina.text();
-    } catch {}
+    } catch { }
   }
 
   const genericAvatar = extractAvatarFromText(content);
@@ -1367,12 +1580,13 @@ function normalizeExtractedData(data: any): ExtractedProfileData {
 }
 
 /**
- * Run comprehensive Profile Audit using Gemini matching Vollna Review Standard
+ * Run comprehensive Profile Audit for Upwork using Gemini matching Vollna Review Standard
  */
-export async function auditProfileWithAi(params: {
+export async function auditUpworkProfileWithAi(params: {
   pdfBuffer?: Buffer;
   profileData?: ExtractedProfileData;
   rawText?: string;
+  platformType?: string;
 }): Promise<VollnaProfileAuditResult> {
   const auditSystemInstruction = `
 You are an elite, world-class Freelance Profile Strategist and Talent Consultant (Vollna & Upwork Top Rated Plus Talent Auditor).
@@ -1695,25 +1909,25 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
           "The current title mixes Data Engineering and NLP/Deep Learning, which are distinct search categories on Upwork with different client intents. Choosing a clear primary niche will increase relevant search impressions and match high-ticket contracts.",
         suggestions:
           Array.isArray(result?.sections?.title?.suggestions) &&
-          result.sections.title.suggestions.length > 0
+            result.sections.title.suggestions.length > 0
             ? result.sections.title.suggestions
             : [
-                {
-                  label: "Primary recommendation",
-                  subtitle: "Clear niche & high client search intent",
-                  content: "NLP & Deep Learning Engineer | Transformers, LLMs & Python",
-                },
-                {
-                  label: "Alternative 1",
-                  subtitle: "Outcome-focused title targeting business automation",
-                  content: "AI Engineer | Custom NLP Models, Classification & NER Solutions",
-                },
-                {
-                  label: "Alternative 2",
-                  subtitle: "Data pipelines & database-centric contracts",
-                  content: "Data Engineer | Python, PostgreSQL & Automated ETL Pipelines",
-                },
-              ],
+              {
+                label: "Primary recommendation",
+                subtitle: "Clear niche & high client search intent",
+                content: "NLP & Deep Learning Engineer | Transformers, LLMs & Python",
+              },
+              {
+                label: "Alternative 1",
+                subtitle: "Outcome-focused title targeting business automation",
+                content: "AI Engineer | Custom NLP Models, Classification & NER Solutions",
+              },
+              {
+                label: "Alternative 2",
+                subtitle: "Data pipelines & database-centric contracts",
+                content: "Data Engineer | Python, PostgreSQL & Automated ETL Pipelines",
+              },
+            ],
       },
       image: {
         status: (result?.sections?.image?.status as VollnaSectionStatus) || "good",
@@ -1728,49 +1942,49 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
         charCount: Number(result?.sections?.overview?.charCount) || chars,
         suggestedStructure:
           Array.isArray(result?.sections?.overview?.suggestedStructure) &&
-          result.sections.overview.suggestedStructure.length > 0
+            result.sections.overview.suggestedStructure.length > 0
             ? result.sections.overview.suggestedStructure
             : [
-                {
-                  id: "hook",
-                  title: "Hook",
-                  subtitle: "First line earns the scroll.",
-                  content: "Turn raw text and complex data pipelines into production-ready NLP models that drive automation and business decisions.",
-                },
-                {
-                  id: "unique_value",
-                  title: "Unique value",
-                  subtitle: "What only you bring.",
-                  content: "Specializing in end-to-end Machine Learning and NLP engineering—from fine-tuning Transformer architectures (BERT, RoBERTa, LLaMA) to deploying scalable PostgreSQL schemas and data pipelines.",
-                },
-                {
-                  id: "how_you_help",
-                  title: "How you help",
-                  subtitle: "Outcomes you deliver.",
-                  bullets: [
-                    "High-performance NLP model fine-tuning with evaluation metrics & Gradio demos",
-                    "Automated API data extraction and ETL data engineering into PostgreSQL",
-                    "Named Entity Recognition (NER), Sentiment Analysis, and Intent Classification",
-                    "Production-grade Python scripts with clean architecture and documentation",
-                  ],
-                },
-                {
-                  id: "proof",
-                  title: "Proof",
-                  subtitle: "Evidence of results.",
-                  bullets: [
-                    "🎓 B.Sc. in Computer Engineering from Ain Shams University",
-                    "📜 Graduate of The AI Diploma (INSTANT) & Advanced Deep Learning Program (APPLAI)",
-                    "💼 Software Engineer at YallaPro: backend data workflows, SQL optimization, and Python scripts",
-                  ],
-                },
-                {
-                  id: "cta",
-                  title: "Call to action",
-                  subtitle: "Make the next step easy.",
-                  content: "Send a direct message with a brief summary of your project, and let's discuss how we can build it together.",
-                },
-              ],
+              {
+                id: "hook",
+                title: "Hook",
+                subtitle: "First line earns the scroll.",
+                content: "Turn raw text and complex data pipelines into production-ready NLP models that drive automation and business decisions.",
+              },
+              {
+                id: "unique_value",
+                title: "Unique value",
+                subtitle: "What only you bring.",
+                content: "Specializing in end-to-end Machine Learning and NLP engineering—from fine-tuning Transformer architectures (BERT, RoBERTa, LLaMA) to deploying scalable PostgreSQL schemas and data pipelines.",
+              },
+              {
+                id: "how_you_help",
+                title: "How you help",
+                subtitle: "Outcomes you deliver.",
+                bullets: [
+                  "High-performance NLP model fine-tuning with evaluation metrics & Gradio demos",
+                  "Automated API data extraction and ETL data engineering into PostgreSQL",
+                  "Named Entity Recognition (NER), Sentiment Analysis, and Intent Classification",
+                  "Production-grade Python scripts with clean architecture and documentation",
+                ],
+              },
+              {
+                id: "proof",
+                title: "Proof",
+                subtitle: "Evidence of results.",
+                bullets: [
+                  "🎓 B.Sc. in Computer Engineering from Ain Shams University",
+                  "📜 Graduate of The AI Diploma (INSTANT) & Advanced Deep Learning Program (APPLAI)",
+                  "💼 Software Engineer at YallaPro: backend data workflows, SQL optimization, and Python scripts",
+                ],
+              },
+              {
+                id: "cta",
+                title: "Call to action",
+                subtitle: "Make the next step easy.",
+                content: "Send a direct message with a brief summary of your project, and let's discuss how we can build it together.",
+              },
+            ],
         fullRewrittenOverview: defaultOverview,
       },
       skills: {
@@ -1779,41 +1993,41 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
         maxSlots: 20,
         currentSkills:
           Array.isArray(result?.sections?.skills?.currentSkills) &&
-          result.sections.skills.currentSkills.length > 0
+            result.sections.skills.currentSkills.length > 0
             ? result.sections.skills.currentSkills
             : (params.profileData?.skills?.length
-                ? params.profileData.skills
-                : ["Python", "Data Engineering", "Natural Language Processing", "Deep Learning", "Machine Learning", "SQL", "Relational Database", "PostgreSQL"]),
+              ? params.profileData.skills
+              : ["Python", "Data Engineering", "Natural Language Processing", "Deep Learning", "Machine Learning", "SQL", "Relational Database", "PostgreSQL"]),
         analysis:
           result?.sections?.skills?.analysis ||
           `Only ${skillsCount} of 20 slots are used, and the set leans toward databases. Add only the relevant skills you actually use to maximize search reach and client matching.`,
         skillsToAdd:
           Array.isArray(result?.sections?.skills?.skillsToAdd) &&
-          result.sections.skills.skillsToAdd.length > 0
+            result.sections.skills.skillsToAdd.length > 0
             ? result.sections.skills.skillsToAdd
             : [
-                "Machine Learning Model",
-                "Data Science",
-                "Data Analysis",
-                "ETL Pipeline",
-                "Transformers",
-                "Hugging Face",
-                "Generative AI",
-                "Data Mining",
-                "TensorFlow",
-                "Text Classification",
-                "AI Model Training",
-              ],
+              "Machine Learning Model",
+              "Data Science",
+              "Data Analysis",
+              "ETL Pipeline",
+              "Transformers",
+              "Hugging Face",
+              "Generative AI",
+              "Data Mining",
+              "TensorFlow",
+              "Text Classification",
+              "AI Model Training",
+            ],
         skillsToReorder:
           Array.isArray(result?.sections?.skills?.skillsToReorder) &&
-          result.sections.skills.skillsToReorder.length > 0
+            result.sections.skills.skillsToReorder.length > 0
             ? result.sections.skills.skillsToReorder
             : [
-                { skill: "Machine Learning", fromRank: 5, toRank: 1 },
-                { skill: "Natural Language Processing", fromRank: 3, toRank: 2 },
-                { skill: "Deep Learning", fromRank: 4, toRank: 3 },
-                { skill: "Python", fromRank: 1, toRank: 4 },
-              ],
+              { skill: "Machine Learning", fromRank: 5, toRank: 1 },
+              { skill: "Natural Language Processing", fromRank: 3, toRank: 2 },
+              { skill: "Deep Learning", fromRank: 4, toRank: 3 },
+              { skill: "Python", fromRank: 1, toRank: 4 },
+            ],
       },
       portfolio: {
         status: (result?.sections?.portfolio?.status as VollnaSectionStatus) || (portfolioCount === 0 ? "warning" : "good"),
@@ -1826,25 +2040,25 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
             : "Keep portfolio case studies updated with measurable client outcomes."),
         projectIdeas:
           Array.isArray(result?.sections?.portfolio?.projectIdeas) &&
-          result.sections.portfolio.projectIdeas.length > 0
+            result.sections.portfolio.projectIdeas.length > 0
             ? result.sections.portfolio.projectIdeas
             : [
-                {
-                  title: "Custom Domain NLP Text Classification & Sentiment Pipeline",
-                  description: "Train and evaluate a domain-specific text classification model on customer feedback, using LSTM or fine-tuned Transformer models with clean Python evaluation code and Gradio demo.",
-                  whyItWorks: "Directly showcases your core NLP skills and addresses the highest-volume client search query in AI.",
-                },
-                {
-                  title: "Automated API Data Extraction & PostgreSQL Ingestion Pipeline",
-                  description: "An automated data engineering pipeline fetching JSON payloads from external APIs, validating data schemas, and loading indexed relational records into PostgreSQL.",
-                  whyItWorks: "Backs up the Data Engineering title claim with verifiable proof of database and ETL competence.",
-                },
-                {
-                  title: "Named Entity Recognition (NER) & Information Extraction Model",
-                  description: "Custom NER model extracting specialized domain terms from unstructured documents with performance metrics report and deployment script.",
-                  whyItWorks: "High-ticket business clients frequently look for custom NER to automate document processing.",
-                },
-              ],
+              {
+                title: "Custom Domain NLP Text Classification & Sentiment Pipeline",
+                description: "Train and evaluate a domain-specific text classification model on customer feedback, using LSTM or fine-tuned Transformer models with clean Python evaluation code and Gradio demo.",
+                whyItWorks: "Directly showcases your core NLP skills and addresses the highest-volume client search query in AI.",
+              },
+              {
+                title: "Automated API Data Extraction & PostgreSQL Ingestion Pipeline",
+                description: "An automated data engineering pipeline fetching JSON payloads from external APIs, validating data schemas, and loading indexed relational records into PostgreSQL.",
+                whyItWorks: "Backs up the Data Engineering title claim with verifiable proof of database and ETL competence.",
+              },
+              {
+                title: "Named Entity Recognition (NER) & Information Extraction Model",
+                description: "Custom NER model extracting specialized domain terms from unstructured documents with performance metrics report and deployment script.",
+                whyItWorks: "High-ticket business clients frequently look for custom NER to automate document processing.",
+              },
+            ],
       },
       experience: {
         status: (result?.sections?.experience?.status as VollnaSectionStatus) || (employmentCount <= 1 ? "warning" : "good"),
@@ -1856,51 +2070,51 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
             : "Employment entries provide high-leverage relevance signals for Upwork search."),
         rolesToAdd:
           Array.isArray(result?.sections?.experience?.rolesToAdd) &&
-          result.sections.experience.rolesToAdd.length > 0
+            result.sections.experience.rolesToAdd.length > 0
             ? result.sections.experience.rolesToAdd
             : [
-                {
-                  title: "Machine Learning / NLP Engineer (Projects & Training)",
-                  description: "Only add this if it reflects real experience, such as freelance, academic, or intensive training projects.",
-                },
-              ],
+              {
+                title: "Machine Learning / NLP Engineer (Projects & Training)",
+                description: "Only add this if it reflects real experience, such as freelance, academic, or intensive training projects.",
+              },
+            ],
         employmentHistoryNote:
           result?.sections?.experience?.employmentHistoryNote ||
           "Current employment lists Software-Engineer at YallaPro. While genuine, expanding the title and bullet points with niche keywords will significantly boost search indexing on Upwork.",
         employmentRewrites:
           Array.isArray(result?.sections?.experience?.employmentRewrites) &&
-          result.sections.experience.employmentRewrites.length > 0
+            result.sections.experience.employmentRewrites.length > 0
             ? result.sections.experience.employmentRewrites
             : [
-                {
-                  currentRole: "Software-Engineer",
-                  company: "YallaPro",
-                  recommendedTitle: "Software Engineer | AI, NLP & Data Pipelines",
-                  recommendedDescription: "Developed and maintained software features and backend data workflows, optimizing PostgreSQL queries, implementing automated ETL data scripts, and integrating machine learning utilities with Python.",
-                  whyItWorks: "Keeps the real job title but adds niche keywords, since employment title and description are high-leverage relevance signals on Upwork.",
-                },
-              ],
+              {
+                currentRole: "Software-Engineer",
+                company: "YallaPro",
+                recommendedTitle: "Software Engineer | AI, NLP & Data Pipelines",
+                recommendedDescription: "Developed and maintained software features and backend data workflows, optimizing PostgreSQL queries, implementing automated ETL data scripts, and integrating machine learning utilities with Python.",
+                whyItWorks: "Keeps the real job title but adds niche keywords, since employment title and description are high-leverage relevance signals on Upwork.",
+              },
+            ],
         suggestedAdditions:
           Array.isArray(result?.sections?.experience?.suggestedAdditions) &&
-          result.sections.experience.suggestedAdditions.length > 0
+            result.sections.experience.suggestedAdditions.length > 0
             ? result.sections.experience.suggestedAdditions
             : [
-                {
-                  type: "Certification",
-                  title: "Hugging Face / NLP course certification",
-                  description: "Adds a recognized NLP credential that supports your niche and trust.",
-                },
-                {
-                  type: "Certification",
-                  title: "Cloud or ML certification (e.g., AWS, Google Cloud, or TensorFlow)",
-                  description: "Supports the deployment and scalability claims in your overview.",
-                },
-                {
-                  type: "Open source",
-                  title: "Open-source NLP project on GitHub",
-                  description: "Gives clients verifiable proof of your NER and classification work.",
-                },
-              ],
+              {
+                type: "Certification",
+                title: "Hugging Face / NLP course certification",
+                description: "Adds a recognized NLP credential that supports your niche and trust.",
+              },
+              {
+                type: "Certification",
+                title: "Cloud or ML certification (e.g., AWS, Google Cloud, or TensorFlow)",
+                description: "Supports the deployment and scalability claims in your overview.",
+              },
+              {
+                type: "Open source",
+                title: "Open-source NLP project on GitHub",
+                description: "Gives clients verifiable proof of your NER and classification work.",
+              },
+            ],
       },
       video: {
         status: (result?.sections?.video?.status as VollnaSectionStatus) || (hasVideo ? "good" : "warning"),
@@ -1912,22 +2126,22 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
             : "No introduction video detected. Profiles with a 30-60 second video introduction see up to 3x higher invitation rates and faster hiring decisions because it establishes immediate trust and verifies communication skills."),
         scriptSections:
           Array.isArray(result?.sections?.video?.scriptSections) &&
-          result.sections.video.scriptSections.length > 0
+            result.sections.video.scriptSections.length > 0
             ? result.sections.video.scriptSections
             : [
-                {
-                  title: "Hook (0-10s)",
-                  content: `Hi there! I'm ${freelancerName}. I help businesses turn complex text and unstructured data into high-accuracy NLP models and automated pipelines.`,
-                },
-                {
-                  title: "Value & Proof (10-35s)",
-                  content: "Whether you need a custom text classification system, named entity recognition, or clean ETL data workflows connected to PostgreSQL, I write clean, maintainable Python code that integrates seamlessly into your production stack.",
-                },
-                {
-                  title: "Call to Action (35-45s)",
-                  content: "If you're looking for an engineer who communicates clearly and delivers reliable results on time, send me a message or invite me to your job. Let's discuss your project!",
-                },
-              ],
+              {
+                title: "Hook (0-10s)",
+                content: `Hi there! I'm ${freelancerName}. I help businesses turn complex text and unstructured data into high-accuracy NLP models and automated pipelines.`,
+              },
+              {
+                title: "Value & Proof (10-35s)",
+                content: "Whether you need a custom text classification system, named entity recognition, or clean ETL data workflows connected to PostgreSQL, I write clean, maintainable Python code that integrates seamlessly into your production stack.",
+              },
+              {
+                title: "Call to Action (35-45s)",
+                content: "If you're looking for an engineer who communicates clearly and delivers reliable results on time, send me a message or invite me to your job. Let's discuss your project!",
+              },
+            ],
       },
       catalog: {
         status: (result?.sections?.catalog?.status as VollnaSectionStatus) || (catalogCount === 0 ? "warning" : "good"),
@@ -1945,26 +2159,914 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
             : "Catalog packages provide fixed-scope entry points for clients seeking fast delivery."),
         projectIdeas:
           Array.isArray(result?.sections?.catalog?.projectIdeas) &&
-          result.sections.catalog.projectIdeas.length > 0
+            result.sections.catalog.projectIdeas.length > 0
             ? result.sections.catalog.projectIdeas
             : [
+              {
+                title: "You will get a custom NLP text classification model",
+                description: "I will train and evaluate a text classification model on your data, using LSTM or fine-tuned Transformer models. Includes data preprocessing, evaluation metrics, clean Python code and a short usage guide.",
+                rationale: "Matches a common client search and can help visibility with the NLP keyword.",
+              },
+              {
+                title: "You will get a Named Entity Recognition (NER) model",
+                description: "I will build an NER model for your domain text, comparing sequence models and Transformers. Includes training code, evaluation report and a Gradio demo to test results.",
+                rationale: "A specific, productized service that reflects your skills.",
+              },
+              {
+                title: "You will get an automated data pipeline with PostgreSQL",
+                description: "I will build an automated API data-fetching pipeline that loads clean data into a well-designed PostgreSQL schema, with optimized SQL queries and documentation.",
+                rationale: "Covers your data engineering side and adds another keyword placement.",
+              },
+            ],
+      },
+    },
+    platform: "upwork",
+    platformType: "upwork",
+  };
+}
+
+/**
+ * -----------------------------------------------------------------------------
+ * 2. Mostaql (مستقل) & Nafezly (نفذلي) Profile Audit Engine (RTL Arabic)
+ * -----------------------------------------------------------------------------
+ */
+export async function auditMostaqlProfileWithAi(
+  params: {
+    pdfBuffer?: Buffer;
+    profileData?: ExtractedProfileData;
+    rawText?: string;
+    platformType?: string;
+  },
+  platformType: "mostaql" | "nafezly" = "mostaql"
+): Promise<VollnaProfileAuditResult> {
+  const p = params.profileData;
+  const platformName = platformType === "nafezly" ? "نفذلي" : "مستقل";
+
+  const mostaqlSystemInstruction = `
+أنت خبير واستشاري عالمي لتقييم وتطوير ملفات المستقلين على منصة ${platformName} (Mostaql / Nafezly Talent Strategist).
+تقييمك يجب أن يكون واقعياً، موضوعياً، وغير مجامل إطلاقاً. ركز على معايير سوق العمل الحر العربي (العملاء في الخليج ومصر والشرق الأوسط).
+أخرج التقييم بالكامل باللغة العربية الاحترافية الفصحى وبصيغة JSON الصارمة.
+
+معايير التقييم وحساب النقاط (من 100 نقطة):
+1. معرض الأعمال وسابقة الإنجاز (30 نقطة):
+   - في ${platformName} العميل العربي يدخل لمعرض الأعمال أولاً قبل قراءة العرض!
+   - إذا كان المعرض فارغاً (0 أعمال): يتم خصم 25 نقطة فوراً!
+   - إذا كان يحتوي على أقل من 4 أعمال: يتم خصم 12 نقطة.
+   - إذا كان يحتوي على 4 أعمال فأكثر مشروحة بنتائج واضحة: ينال 26-30 نقطة.
+2. النبذة التعريفية وهيكلة الإقناع (25 نقطة):
+   - الافتتاحية بخطّاف افتتاحي قوي (أول سطرين يركزان على حل مشاكل العميل العربي بدلاً من الافتتاحيات التقليدية مثل "أنا مهندس...").
+   - القيمة التنافسية (ما يميز المستقل عن باقي المنافسين).
+   - الحلول والنتائج بوضوح (Bullets).
+   - سابقة الأعمال والإثبات (الشهادات والخبرات).
+   - دعوة صريحة للتواصل (CTA).
+3. مؤشرات الثقة والأوسمة (20 نقطة):
+   - معدل إكمال المشاريع، إعادة التوظيف، توثيق الهوية، الأوسمة (مستقل ملتزم، هاتف مؤكد).
+4. المسمى الوظيفي والكلمات المفتاحية (15 نقطة):
+   - مسمى محدد دقيق للتصدر في بحث ${platformName}.
+5. المهارات والصورة الشخصية (10 نقاط):
+   - مهارات مستهدفة + صورة واضحة وموثوقة.
+
+يجب أن يكون الرد بصيغة JSON وفق هذا المخطط الدقيق:
+{
+  "freelancerName": string,
+  "currentTitle": string,
+  "avatarUrl": string | null,
+  "overallScore": number,
+  "executiveSummary": string,
+  "platformStats": [
+    { "label": "معدل إكمال المشاريع", "value": string, "icon": "CheckCircle", "color": "text-emerald-600" },
+    { "label": "إعادة التوظيف", "value": string, "icon": "TrendingUp", "color": "text-blue-600" },
+    { "label": "المشاريع المكتملة", "value": string, "icon": "Briefcase", "color": "text-purple-600" },
+    { "label": "معرض الأعمال", "value": string, "icon": "Layers", "color": "text-amber-600" }
+  ],
+  "sections": {
+    "overview": {
+      "status": "warning" | "good" | "critical",
+      "currentText": string,
+      "wordCount": number,
+      "charCount": number,
+      "suggestedStructure": [
+        { "id": "hook", "title": "الخُطّاف الافتتاحي (Hook)", "subtitle": "أول سطرين لجذب العميل العربي وإقناعه بقراءة المزيد", "content": string },
+        { "id": "unique_value", "title": "القيمة التنافسية (لماذا تختارني؟)", "subtitle": "ما يميزك عن باقي المستقلين في مجالك", "content": string },
+        { "id": "how_you_help", "title": "ماذا سأقدم لمشروعك؟ (الحلول والنتائج)", "subtitle": "نقاط واضحة ومحددة تشرح ما سيتسلمه العميل", "bullets": string[] },
+        { "id": "proof", "title": "سابقة الأعمال والإثبات (Proof)", "subtitle": "أرقام وخبرات وشهادات تدعم مصداقيتك", "bullets": string[] },
+        { "id": "cta", "title": "الدعوة للتواصل (Call to Action)", "subtitle": "جملة ختامية تشجع العميل على مراسلتك لمناقشة مشروعه", "content": string }
+      ],
+      "fullRewrittenOverview": string
+    },
+    "title": {
+      "status": "warning" | "good" | "critical",
+      "currentText": string,
+      "analysis": string,
+      "suggestions": [
+        { "label": "المسمى المقترح الأول (الأكثر تصدراً في البحث)", "subtitle": "مخصص لخوارزمية بحث مستقل المباشرة", "content": string },
+        { "label": "المسمى المقترح الثاني (قائم على القيمة والنتائج)", "subtitle": "يركز على النتيجة النهائية للعميل", "content": string },
+        { "label": "المسمى المقترح الثالث (تخصص دقيق وعالي القيمة)", "subtitle": "لجذب المشاريع الكبيرة والميزانيات المرتفعة", "content": string }
+      ]
+    },
+    "portfolio": {
+      "status": "warning" | "good" | "critical",
+      "currentCount": number,
+      "alertTitle": string,
+      "alertMessage": string,
+      "projectIdeas": [
+        { "title": string, "description": string, "whyItWorks": string },
+        { "title": string, "description": string, "whyItWorks": string },
+        { "title": string, "description": string, "whyItWorks": string }
+      ]
+    },
+    "skills": {
+      "status": "warning" | "good" | "critical",
+      "usedSlots": number,
+      "maxSlots": 20,
+      "currentSkills": string[],
+      "analysis": string,
+      "skillsToAdd": string[]
+    },
+    "trust_metrics": {
+      "status": "warning" | "good" | "critical",
+      "analysis": string,
+      "badges": string[],
+      "metrics": [
+        { "name": string, "currentValue": string, "targetValue": string, "impact": string }
+      ],
+      "tips": string[]
+    },
+    "image": {
+      "status": "warning" | "good" | "critical",
+      "analysis": string
+    }
+  }
+}
+`.trim();
+
+  const rawBio = p?.bio || (typeof params.rawText === "string" ? params.rawText : "");
+  const words = rawBio.trim() ? rawBio.trim().split(/\s+/).length : 0;
+  const chars = rawBio.length;
+
+  const currentTitle = p?.headline || "مطور ومستقل محترف";
+  const freelancerName = p?.fullName || "مستقل محترف";
+  const avatarUrl = p?.avatarUrl || null;
+
+  const portfolioCount = p?.portfolioCount ?? p?.portfolioItems?.length ?? 0;
+  const completionRate = p?.stats?.completionRate || "100%";
+  const rehireRate = p?.stats?.rehireRate || "0%";
+  const onTimeDelivery = p?.stats?.onTimeDelivery || "100%";
+  const responseSpeed = p?.stats?.responseSpeed || "خلال ساعات";
+  const completedProjects = p?.stats?.completedProjects || 0;
+  const overallRating = p?.stats?.overallRating || "5.0";
+  const badges = p?.stats?.badges || ["مستقل مسجل"];
+
+  const promptText = `
+بيانات المستقل على منصة ${platformName}:
+- الاسم: ${freelancerName}
+- المسمى الحالي: ${currentTitle}
+- التقييم العام: ${overallRating}
+- معدل إكمال المشاريع: ${completionRate}
+- معدل إعادة التوظيف: ${rehireRate}
+- التسليم في الموعد: ${onTimeDelivery}
+- متوسط سرعة الرد: ${responseSpeed}
+- المشاريع المكتملة: ${completedProjects}
+- الأوسمة الحالية: ${badges.join("، ")}
+- عدد الأعمال المنشورة في المعرض: ${portfolioCount}
+- المهارات الحالية (${p?.skills?.length || 0}): ${p?.skills?.join("، ") || "لم تُحدد مهارات"}
+- الأعمال المنشورة الحالية:
+${(p?.portfolioItems || []).map((item, idx) => `${idx + 1}. ${item.title}: ${item.description}`).join("\n") || "لا توجد أعمال منشورة في المعرض"}
+
+النبذة الحالية:
+${rawBio}
+`.trim();
+
+  const contents = [
+    {
+      parts: [{ text: `قم بإجراء الفحص التقييمي الشامل لملف هذا المستقل على ${platformName}:\n\n${promptText}` }],
+    },
+  ];
+
+  let result: any = null;
+  try {
+    result = await callGemini(contents, mostaqlSystemInstruction);
+  } catch (err: any) {
+    console.warn("[Mostaql Audit] Gemini error, using rich Arabic heuristic fallback:", err.message);
+  }
+
+  // Calculate Deterministic Score
+  const calculatedScore = calculateMostaqlDeterministicScore({
+    portfolioCount,
+    completionRate,
+    rehireRate,
+    badges,
+    skillsCount: p?.skills?.length || 0,
+    bio: rawBio,
+    headline: currentTitle,
+    hasAvatar: Boolean(avatarUrl),
+  });
+
+  const overallScore = calculatedScore;
+
+  // Platform Stats Bar
+  const platformStats = [
+    { label: "معدل إكمال المشاريع", value: completionRate, icon: "CheckCircle", color: "text-emerald-600" },
+    { label: "إعادة التوظيف", value: rehireRate, icon: "TrendingUp", color: "text-blue-600" },
+    { label: "المشاريع المكتملة", value: `${completedProjects} مشروع`, icon: "Briefcase", color: "text-purple-600" },
+    { label: "معرض الأعمال", value: `${portfolioCount} عمل`, icon: "Layers", color: "text-amber-600" },
+  ];
+
+  const executiveSummary =
+    result?.executiveSummary ||
+    `بروفايل على منصة ${platformName} بمعدل إكمال مشاريع ${completionRate}، و${completedProjects} مشروع مكتمل، و${portfolioCount} أعمال منشورة في المعرض. أهم الفجوات التي تؤثر على معدل قبول عروضك وجذب العملاء في السوق العربي هي: ${
+      portfolioCount < 4
+        ? `قلة أعمال المعرض المنشورة (${portfolioCount} فقط بينما يُشترط وجود 4 أعمال على الأقل للتأثير وإثبات الجدارة)`
+        : "الحاجة إلى تحسين الكلمات المفتاحية في معرض الأعمال"
+    }، بالإضافة إلى صياغة نبذة تعريفية تخاطب احتياجات العميل العربي مباشرة وتركز على القيمة المضافة وحل المشكلات.`;
+
+  const defaultOverview =
+    result?.sections?.overview?.fullRewrittenOverview ||
+    `أساعد أصحاب المشاريع والشركات الناشئة في الوطن العربي على تحويل متطلباتهم البرمجية إلى منتجات رقمية سريعة ومستقرة تحقق أهدافهم التجارية.\n\nمتخصص في تطوير التطبيقات والحلول البرمجية المتكاملة مع التركيز التام على الجودة، نظافة الكود، وسهولة الاستخدام للعميل النهائي.\n\nلماذا تختار التعامل معي لمشروعك؟\n• تسليم منضبط وفي الموعد بنسبة التزام 100% ودقة في المواعيد\n• كود منظم، موثق وسهل التطوير مستقبلاً بدون أخطاء خفية\n• دعم فني وتواصل مستمر وتحديثات دورية خلال فترة التنفيذ\n• ضمان الرضا التام وإجراء التعديلات المطلوبة حتى اعتماد المشروع بالكامل\n\nسابقة الخبرات والإثبات:\n🎓 بكالوريوس في هندسة البرمجيات مع خبرة عملية في مشاريع حية\n💼 تنفيذ وإطلاق مشاريع تقنية سابقة لعملاء في السعودية، الإمارات، ومصر\n\nجاهز لبدء مشروعك الآن؟ راسلني بتفاصيل فكرتك لنبدأ في تحويلها إلى واقع بأعلى جودة.`;
+
+  return {
+    freelancerName: result?.freelancerName || freelancerName,
+    currentTitle: result?.currentTitle || currentTitle,
+    avatarUrl,
+    overallScore,
+    executiveSummary,
+    platform: platformType,
+    platformType,
+    platformStats,
+    stats: {
+      completionRate,
+      rehireRate,
+      onTimeDelivery,
+      responseSpeed,
+      completedProjects,
+      portfolioCount,
+      overallRating,
+      badges,
+    },
+    sections: {
+      overview: {
+        status: (result?.sections?.overview?.status as VollnaSectionStatus) || (rawBio.length < 250 ? "warning" : "good"),
+        currentText: rawBio,
+        wordCount: Number(result?.sections?.overview?.wordCount) || words,
+        charCount: Number(result?.sections?.overview?.charCount) || chars,
+        suggestedStructure:
+          Array.isArray(result?.sections?.overview?.suggestedStructure) &&
+          result.sections.overview.suggestedStructure.length > 0
+            ? result.sections.overview.suggestedStructure
+            : [
                 {
-                  title: "You will get a custom NLP text classification model",
-                  description: "I will train and evaluate a text classification model on your data, using LSTM or fine-tuned Transformer models. Includes data preprocessing, evaluation metrics, clean Python code and a short usage guide.",
-                  rationale: "Matches a common client search and can help visibility with the NLP keyword.",
+                  id: "hook",
+                  title: "الخُطّاف الافتتاحي (Hook)",
+                  subtitle: "أول سطرين لجذب العميل العربي وإقناعه بقراءة المزيد",
+                  content: "أساعد الشركات وأصحاب الأعمال في العالم العربي على تحويل أفكارهم التقنية إلى حلول برمجية سريعة ومتقنة تحقق عائداً استثمارياً واضحاً.",
                 },
                 {
-                  title: "You will get a Named Entity Recognition (NER) model",
-                  description: "I will build an NER model for your domain text, comparing sequence models and Transformers. Includes training code, evaluation report and a Gradio demo to test results.",
-                  rationale: "A specific, productized service that reflects your skills.",
+                  id: "unique_value",
+                  title: "القيمة التنافسية (لماذا تختارني؟)",
+                  subtitle: "ما يميزك عن بقية المستقلين في هذا المجال",
+                  content: "أجمع بين فهم متطلبات السوق العربي وسرعة التنفيذ مع الالتزام التام بتسليم كود نظيف وتجربة مستخدم سلسة خالية من التعقيد.",
                 },
                 {
-                  title: "You will get an automated data pipeline with PostgreSQL",
-                  description: "I will build an automated API data-fetching pipeline that loads clean data into a well-designed PostgreSQL schema, with optimized SQL queries and documentation.",
-                  rationale: "Covers your data engineering side and adds another keyword placement.",
+                  id: "how_you_help",
+                  title: "ماذا سأقدم لمشروعك؟ (الحلول والنتائج)",
+                  subtitle: "نقاط واضحة ومحددة تشرح ما يحصل عليه العميل",
+                  bullets: [
+                    "تطوير شامل للواجهات والأنظمة البرمجية بدقة واحترافية",
+                    "ربط قواعد البيانات وتأمين البيانات وسرعة استجابة الخوادم",
+                    "اختبارات مكثفة للأخطاء قبل التسليم لضمان الجاهزية للعمل الفوري",
+                    "دعم فني وتواصل مستمر وتعديلات مرنة تلبي رغبتك بالكامل",
+                  ],
+                },
+                {
+                  id: "proof",
+                  title: "سابقة الأعمال والإثبات (Proof)",
+                  subtitle: "أرقام وخبرات حقيقية تدعم مصداقيتك",
+                  bullets: [
+                    "🎓 شهادة متخصصة في هندسة البرمجيات والأنظمة الحديثة",
+                    "💼 سابقة تنفيذ مشاريع برمجية ناجحة لعملاء ورواد أعمال في الخليج ومصر",
+                    "⭐ سجل تقييمات ممتاز والتزام بمعدل إكمال مشاريع بنسبة 100%",
+                  ],
+                },
+                {
+                  id: "cta",
+                  title: "الدعوة للتواصل (Call to Action)",
+                  subtitle: "جملة ختامية تشجع العميل على مراسلتك لمناقشة مشروعه",
+                  content: "تفضل بمراسلتي الآن لمناقشة تفاصيل مشروعك واستلام خطة تنفيذ واضحة وتقدير زمني دقيق.",
+                },
+              ],
+        fullRewrittenOverview: defaultOverview,
+      },
+      title: {
+        status: (result?.sections?.title?.status as VollnaSectionStatus) || "good",
+        currentText: currentTitle,
+        analysis:
+          result?.sections?.title?.analysis ||
+          `المسمى الوظيفي الحالي يعبر عن تخصصك، ولكن يمكن تخصيصه أكثر بكلمات مفتاحية مستهدفة تتصدر بحث أصحاب المشاريع في ${platformName}.`,
+        suggestions:
+          Array.isArray(result?.sections?.title?.suggestions) &&
+          result.sections.title.suggestions.length > 0
+            ? result.sections.title.suggestions
+            : [
+                {
+                  label: "المسمى المقترح الأول (الأكثر تصدراً في البحث)",
+                  subtitle: `مخصص لخوارزمية بحث ${platformName} المباشرة`,
+                  content: `${currentTitle} | مطور برمجيات وحلول رقمية متكاملة`,
+                },
+                {
+                  label: "المسمى المقترح الثاني (قائم على القيمة والنتائج)",
+                  subtitle: "يركز على النتيجة النهائية والقيمة التي يبحث عنها العميل العربي",
+                  content: "مهندس برمجيات متخصص في بناء وتطوير المنتجات الرقمية للشركات والمتاجر",
+                },
+                {
+                  label: "المسمى المقترح الثالث (تخصص دقيق وعالي القيمة)",
+                  subtitle: "لجذب المشاريع الكبيرة والميزانيات المرتفعة",
+                  content: "خبير برمجي متكامل | أتمتة الأنظمة وتطوير تطبيقات الويب الحديثة",
                 },
               ],
       },
+      portfolio: {
+        status:
+          (result?.sections?.portfolio?.status as VollnaSectionStatus) ||
+          (portfolioCount === 0 ? "critical" : portfolioCount < 4 ? "warning" : "good"),
+        currentCount: portfolioCount,
+        alertTitle:
+          result?.sections?.portfolio?.alertTitle ||
+          (portfolioCount === 0
+            ? "معرض الأعمال فارغ تماماً (-25 نقطة)"
+            : portfolioCount < 4
+            ? `معرض الأعمال يحتاج تعزيز (${portfolioCount} أعمال فقط)`
+            : "معرض أعمال مكتمل وموثوق"),
+        alertMessage:
+          result?.sections?.portfolio?.alertMessage ||
+          (portfolioCount === 0
+            ? `في ${platformName}، العميل يدخل لمعرض الأعمال أولاً قبل قراءة العرض! إضافة 3 مشاريع مشروحة ضرورة قصوى لزيادة قبول عروضك.`
+            : "إضافة مشاريع جديدة دورياً تُثبت جاهزيتك وتزيد من ظهورك في نتائج المستقلين الأكثر نشاطاً."),
+        projectIdeas:
+          Array.isArray(result?.sections?.portfolio?.projectIdeas) &&
+          result.sections.portfolio.projectIdeas.length > 0
+            ? result.sections.portfolio.projectIdeas
+            : [
+                {
+                  title: "منصة ويب متكاملة لحجز الخدمات وإدارة الطلبات",
+                  description:
+                    "نظام ويب متكامل يتيح للمستخدمين استعراض الخدمات وحجز المواعيد مع لوحة تحكم إدارية تفاعلية لإدارة العملاء والمدفوعات الإلكترونية.",
+                  whyItWorks: "من أكثر أنواع المشاريع طلباً من رواد الأعمال وأصحاب المتاجر في السعودية والخليج.",
+                },
+                {
+                  title: "لوحة تحكم إحصائية وإدارة قواعد البيانات للمؤسسات",
+                  description:
+                    "داشبورد تفاعلي لعرض الرسوم البيانية ومؤشرات الأداء (KPIs) مع إمكانية تصدير التقارير بصيغة PDF/Excel وإدارة الصلاحيات.",
+                  whyItWorks: "يثبت مهاراتك في هندسة البيانات والتطوير المتقدم للشركات التي تبحث عن حلول أعمال متطورة.",
+                },
+                {
+                  title: "نظام أتمتة وربط الـ APIs مع منصات الدفع والتواصل",
+                  description:
+                    "حل برمجي لربط الأنظمة ببوابات الدفع الإلكتروني وتطبيقات المراسلة مثل WhatsApp وTelegram لإرسال إشعارات فورية وتحديثات الحالة.",
+                  whyItWorks: "طلب شائع جداً ذو عائد مرتفع يعكس كفاءتك في التكاملات التقنية والأتمتة السريعة.",
+                },
+              ],
+        currentItems: p?.portfolioItems || [],
+      },
+      skills: {
+        status: (result?.sections?.skills?.status as VollnaSectionStatus) || "good",
+        usedSlots: p?.skills?.length || 6,
+        maxSlots: 20,
+        currentSkills: p?.skills?.length ? p.skills : ["تطوير الويب", "برمجة", "قواعد البيانات", "حل المشكلات"],
+        analysis:
+          result?.sections?.skills?.analysis ||
+          `المهارات المحددة في بروفايلك جيدة، ولكن إضافة مهارات تقنية شائعة البحث في ${platformName} سيرفع من معدل تلقي دعوات المشاريع الخاصة.`,
+        skillsToAdd:
+          Array.isArray(result?.sections?.skills?.skillsToAdd) &&
+          result.sections.skills.skillsToAdd.length > 0
+            ? result.sections.skills.skillsToAdd
+            : [
+                "تطوير الواجهات الخلفية (Backend)",
+                "بناء واجهات API (RESTful APIs)",
+                "ربط بوابات الدفع الإلكتروني",
+                "أتمتة الأعمال وسكربتات بايثون",
+                "قواعد بيانات PostgreSQL / MySQL",
+                "أمن وتأمين التطبيقات",
+                "تجاوب مع الهواتف الذكية (Responsive)",
+              ],
+        skillsToReorder: [],
+      },
+      trust_metrics: {
+        status:
+          completionRate === "100%" && badges.some((b) => b.includes("موثقة"))
+            ? "good"
+            : "warning",
+        analysis:
+          result?.sections?.trust_metrics?.analysis ||
+          `معدل إكمال المشاريع لديك ${completionRate} وهو مؤشر إيجابي جداً. الاستمرار في تسليم المشاريع قبل الموعد وحصد التقييمات الإيجابية هو العامل الحاسم لتصدر صفحة المستقلين المتميزين.`,
+        badges,
+        metrics: [
+          {
+            name: "معدل إكمال المشاريع",
+            currentValue: completionRate,
+            targetValue: "100%",
+            impact: "حاسم لظهورك في نتائج البحث الأولى واكتساب ثقة صاحب المشروع",
+          },
+          {
+            name: "معدل إعادة التوظيف",
+            currentValue: rehireRate,
+            targetValue: "20%+",
+            impact: "دليل عملي قوي على رضا العملاء السابقين ورغبتهم في العمل معك مجدداً",
+          },
+          {
+            name: "التسليم في الموعد",
+            currentValue: onTimeDelivery,
+            targetValue: "100%",
+            impact: "يبني سمعتك كمستقل ملتزم وجاد لا يضيع أوقات الشركات",
+          },
+          {
+            name: "توثيق الهوية والحساب",
+            currentValue: badges.some((b) => b.includes("موثقة")) ? "موثقة ✅" : "غير موثقة ⚠️",
+            targetValue: "هوية موثقة",
+            impact: "يوفر وسام الثقة الأخضر ويزيد معدل قبول عروضك بنسبة تصل إلى 80%",
+          },
+        ],
+        tips: [
+          "احرص على توثيق هويتك الوطنية فوراً إن لم تفعل، فالعميل يفضل التعاقد مع هوية مؤكدة.",
+          "اطلب دائماً من العميل السعيد تقييم العمل فور تسليمه، فهذا يرفع معدل إكمال المشاريع وسرعة الترقية.",
+          "في حال طرأ أي تأخير خارج عن إرادتك، تواصل مع العميل مبكراً لتعديل تاريخ التسليم بالاتفاق لتفادي المساس بنسبة التسليم في الموعد.",
+        ],
+      },
+      image: {
+        status: avatarUrl ? "good" : "warning",
+        analysis:
+          result?.sections?.image?.analysis ||
+          (avatarUrl
+            ? "الصورة الشخصية واضحة وتمنح انطباعاً أولياً بالجدية والمصداقية المهنية. يُفضل دوماً خلفية محايدة وإضاءة أمامية جيدة."
+            : "لم يتم رصد صورة شخصية واضحة. إضافة صورة شخصية احترافية ترفع معدل ثقة العميل العربي وتزيد فرص التعاقد."),
+      },
+      // Safe fallbacks for Upwork tabs so existing components won't break
+      experience: {
+        status: "good",
+        alertTitle: "سجل الخبرات المعتمد",
+        alertMessage: "الخبرات مدعمة بالإحصائيات والمشاريع المنفذة.",
+        rolesToAdd: [],
+        employmentHistoryNote: "",
+        employmentRewrites: [],
+        suggestedAdditions: [],
+      },
+      video: {
+        status: "good",
+        hasVideo: false,
+        analysis: "الفيديو ليس متطلباً في منصة مستقل.",
+        scriptSections: [],
+      },
+      catalog: {
+        status: "good",
+        currentCount: 0,
+        infoBanner: "",
+        alertTitle: "",
+        alertMessage: "",
+        projectIdeas: [],
+      },
     },
   };
+}
+
+/**
+ * -----------------------------------------------------------------------------
+ * 3. Khamsat (خمسات) Micro-Services Audit Engine (RTL Arabic)
+ * -----------------------------------------------------------------------------
+ */
+export async function auditKhamsatProfileWithAi(params: {
+  pdfBuffer?: Buffer;
+  profileData?: ExtractedProfileData;
+  rawText?: string;
+  platformType?: string;
+}): Promise<VollnaProfileAuditResult> {
+  const p = params.profileData;
+  const rawBio = p?.bio || (typeof params.rawText === "string" ? params.rawText : "");
+  const words = rawBio.trim() ? rawBio.trim().split(/\s+/).length : 0;
+  const chars = rawBio.length;
+
+  const currentTitle = p?.headline || "بائع موثوق في خمسات";
+  const freelancerName = p?.fullName || "بائع خمسات";
+  const avatarUrl = p?.avatarUrl || null;
+
+  const sellerLevel = p?.stats?.sellerLevel || "بائع جديد";
+  const overallRating = p?.stats?.overallRating || "100%";
+  const clientsCount = p?.stats?.clientsCount || "0";
+  const responseSpeed = p?.stats?.responseSpeed || "خلال ساعة";
+  const gigsCount = p?.gigs?.length || p?.portfolioCount || 0;
+
+  const khamsatSystemInstruction = `
+أنت خبير واستشاري متخصص في منصة خمسات (Khamsat Micro-Services Top Strategist).
+تقييمك مخصص لبيع الخدمات المصغرة ومضاعفة مبيعات البائع وزيادة متوسط قيمة الطلب (Cart Value) عبر التطويرات الذكية (Upsells) من 5$ إلى 50$+.
+أخرج التقييم بالكامل باللغة العربية الاحترافية الفصحى بصيغة JSON الصارمة.
+
+معايير التقييم وحساب النقاط (من 100 نقطة):
+1. جودة وصياغة الخدمات المنشورة (35 نقطة):
+   - عناوين واضحة وجذابة بصيغة خمسات الشهيرة ("سأقوم بـ ...").
+   - 0 خدمات = خصم 30 نقطة فوراً!
+2. تطويرات الخدمات ومضاعفة السعر (25 نقطة):
+   - تطويرات ذكية تضيف قيمة حقيقية للعميل وترفع قيمة الطلب.
+3. نبذة البائع وبناء الثقة والضمانات (20 نقطة):
+   - صياغة نبذة تعرف بالبائع وتبني طمأنينة للمشتري الجديد.
+4. رتبة البائع وسرعة الرد (20 نقطة):
+   - بائع مميز / موثوق = 20، نشيط = 16، جديد = 10. سرعة الرد السريعة (< ساعة) تمنح نقاطاً كاملة.
+
+يجب أن يكون الرد بصيغة JSON وفق هذا المخطط:
+{
+  "freelancerName": string,
+  "currentTitle": string,
+  "avatarUrl": string | null,
+  "overallScore": number,
+  "executiveSummary": string,
+  "platformStats": [
+    { "label": "الخدمات النشطة", "value": string, "icon": "ShoppingBag", "color": "text-emerald-600" },
+    { "label": "التقييم العام", "value": string, "icon": "Award", "color": "text-amber-600" },
+    { "label": "رتبة البائع", "value": string, "icon": "User", "color": "text-blue-600" },
+    { "label": "سرعة الرد", "value": string, "icon": "Clock", "color": "text-purple-600" }
+  ],
+  "sections": {
+    "gigs": {
+      "status": "warning" | "good" | "critical",
+      "currentCount": number,
+      "analysis": string,
+      "suggestedGigs": [
+        {
+          "title": string,
+          "category": string,
+          "price": string,
+          "deliveryTime": string,
+          "description": string,
+          "whyItSells": string
+        }
+      ]
+    },
+    "upsells": {
+      "status": "warning" | "good" | "critical",
+      "analysis": string,
+      "strategies": [
+        {
+          "gigTitle": string,
+          "basePrice": string,
+          "upsellTiers": [
+            { "addon": string, "extraPrice": string, "extraDays": string, "pitch": string }
+          ]
+        }
+      ]
+    },
+    "overview": {
+      "status": "warning" | "good" | "critical",
+      "currentText": string,
+      "wordCount": number,
+      "charCount": number,
+      "suggestedStructure": [
+        { "id": "hook", "title": "مقدمة الثقة للبائع", "subtitle": "سطرين لتعريف المشتري بمجال خبرتك", "content": string },
+        { "id": "unique_value", "title": "ضمانات الخدمة وجودة التنفيذ", "subtitle": "ما الذي يضمن للمشتري استلام عمل متقن", "content": string },
+        { "id": "how_you_help", "title": "مميزات التعامل معي", "subtitle": "سرعة التنفيذ والتعديلات والتواصل", "bullets": string[] },
+        { "id": "cta", "title": "دعوة لطلب الخدمة", "subtitle": "شجع المشتري على التواصل قبل الطلب", "content": string }
+      ],
+      "fullRewrittenOverview": string
+    },
+    "trust_metrics": {
+      "status": "warning" | "good" | "critical",
+      "analysis": string,
+      "badges": string[],
+      "metrics": [
+        { "name": string, "currentValue": string, "targetValue": string, "impact": string }
+      ],
+      "tips": string[]
+    },
+    "image": {
+      "status": "warning" | "good" | "critical",
+      "analysis": string
+    }
+  }
+}
+`.trim();
+
+  const promptText = `
+بيانات بائع خمسات:
+- الاسم: ${freelancerName}
+- رتبة البائع الحالية: ${sellerLevel}
+- التقييم العام: ${overallRating}
+- عدد المشترين/العملاء: ${clientsCount}
+- سرعة الرد: ${responseSpeed}
+- عدد الخدمات الحالية: ${gigsCount}
+- قائمة الخدمات الحالية:
+${(p?.gigs || []).map((g, i) => `${i + 1}. ${g.title} (${g.price || "5$"})`).join("\n") || "لا توجد خدمات معروضة حالياً"}
+
+النبذة الحالية:
+${rawBio}
+`.trim();
+
+  const contents = [
+    {
+      parts: [{ text: `قم بإجراء الفحص التقييمي لخدمات وبروفايل بائع خمسات:\n\n${promptText}` }],
+    },
+  ];
+
+  let result: any = null;
+  try {
+    result = await callGemini(contents, khamsatSystemInstruction);
+  } catch (err: any) {
+    console.warn("[Khamsat Audit] Gemini error, using rich fallback:", err.message);
+  }
+
+  const calculatedScore = calculateKhamsatDeterministicScore({
+    gigsCount,
+    sellerLevel,
+    responseSpeed,
+    bio: rawBio,
+    hasAvatar: Boolean(avatarUrl),
+  });
+
+  const overallScore = calculatedScore;
+
+  const platformStats = [
+    { label: "الخدمات النشطة", value: `${gigsCount} خدمة`, icon: "ShoppingBag", color: "text-emerald-600" },
+    { label: "التقييم العام", value: overallRating, icon: "Award", color: "text-amber-600" },
+    { label: "رتبة البائع", value: sellerLevel, icon: "User", color: "text-blue-600" },
+    { label: "سرعة الرد", value: responseSpeed, icon: "Clock", color: "text-purple-600" },
+  ];
+
+  const executiveSummary =
+    result?.executiveSummary ||
+    `حساب برتبة (${sellerLevel}) على منصة خمسات بتقييم عام ${overallRating}، ولديك ${gigsCount} خدمات نشطة ومتوسط سرعة رد ${responseSpeed}. أهم الأولويات لمضاعفة أرباحك على خمسات هي: ${
+      gigsCount < 3
+        ? "نشر 3 إلى 5 خدمات متنوعة بصيغ بحثية دقيقة لزيادة فرص ظهورك في أقسام خمسات"
+        : "إضافة تطويرات ذكية بأسعار بين 10$ و50$ لكل خدمة لرفع متوسط قيمة الطلب بدلاً من الاكتفاء بسعر 5$ الأساسي"
+    }، بالإضافة إلى استهداف الترقية السريعة إلى (بائع نشيط) عبر المحافظة على التقييمات الإيجابية وسرعة الرد.`;
+
+  return {
+    freelancerName: result?.freelancerName || freelancerName,
+    currentTitle: result?.currentTitle || `${sellerLevel} في خمسات`,
+    avatarUrl,
+    overallScore,
+    executiveSummary,
+    platform: "khamsat",
+    platformType: "khamsat",
+    platformStats,
+    stats: {
+      sellerLevel,
+      overallRating,
+      clientsCount,
+      responseSpeed,
+      activeServicesCount: gigsCount,
+      portfolioCount: gigsCount,
+    },
+    sections: {
+      gigs: {
+        status: (result?.sections?.gigs?.status as VollnaSectionStatus) || (gigsCount === 0 ? "critical" : "good"),
+        currentCount: gigsCount,
+        analysis:
+          result?.sections?.gigs?.analysis ||
+          `لديك حالياً ${gigsCount} خدمات. زيادة عدد الخدمات المصغرة المصاغة بدقة يساعد خوارزميات خمسات على اقتراح خدماتك في نتائج البحث والخدمات ذات الصلة.`,
+        currentGigs: p?.gigs || [],
+        suggestedGigs:
+          Array.isArray(result?.sections?.gigs?.suggestedGigs) &&
+          result.sections.gigs.suggestedGigs.length > 0
+            ? result.sections.gigs.suggestedGigs
+            : [
+                {
+                  title: "سأقوم بإنشاء موقع تعريفي احترافي متجاوب وسريع لمشروعك",
+                  category: "برمجة وتطوير",
+                  price: "10$",
+                  deliveryTime: "يومين",
+                  description:
+                    "أقدم لك موقعاً تعريفياً عصرياً وأنيقاً يبرز نشاطك التجاري أو خدماتك الشخصية، متوافقاً تماماً مع جميع مقاسات الشاشات والهواتف، وسريع التصفح وفق أفضل الممارسات البرمجية.",
+                  whyItSells: "من أكثر الخدمات طلباً على خمسات لأصحاب الأعمال والأنشطة الناشئة.",
+                },
+                {
+                  title: "سأقوم بتصميم وتطوير صفحة هبوط تسويقية لزيادة مبيعاتك",
+                  category: "برمجة وتطوير",
+                  price: "15$",
+                  deliveryTime: "يوم واحد",
+                  description:
+                    "تصميم وبرمجة صفحة هبوط (Landing Page) تسويقية جذابة ومركزة على إقناع الزائر واتخاذ قرار الشراء، مع نموذج تواصل أو زر طلب مباشر وربط بالواتساب.",
+                  whyItSells: "يحتاجها كل من يطلق إعلانات ممولة في الخليج ومصر لتحويل الزوار إلى عملاء.",
+                },
+                {
+                  title: "سأقوم بفحص وإصلاح أخطاء ومشاكل موقعك البرمجية والتقنية",
+                  category: "برمجة وتطوير",
+                  price: "5$",
+                  deliveryTime: "خلال 24 ساعة",
+                  description:
+                    "فحص شامل لموقعك أو متجرك واكتشاف أي أخطاء في الكود أو التصميم أو سرعة التحميل وإصلاحها فوراً لضمان عمل موقعك بأقصى كفاءة بدون توقف.",
+                  whyItSells: "خدمة سريعة ذات سعر دخول منخفض تشجع العملاء على الطلب الفوري وفتح باب التعاقدات اللاحقة.",
+                },
+              ],
+      },
+      upsells: {
+        status: "warning",
+        analysis:
+          result?.sections?.upsells?.analysis ||
+          "الاعتماد على سعر 5$ فقط يستهلك طاقتك دون عائد مجزٍ. إضافة تطويرات متدرجة من 10$ إلى 50$ تضاعف دخلك من نفس العميل بمقدار 4 إلى 10 أضعاف.",
+        strategies:
+          Array.isArray(result?.sections?.upsells?.strategies) &&
+          result.sections.upsells.strategies.length > 0
+            ? result.sections.upsells.strategies
+            : [
+                {
+                  gigTitle: "تطوير موقع تعريفي احترافي لمشروعك",
+                  basePrice: "10$",
+                  upsellTiers: [
+                    {
+                      addon: "إضافة 3 صفحات إضافية مفصلة مع ربط وسائل التواصل",
+                      extraPrice: "+15$",
+                      extraDays: "+ يوم واحد",
+                      pitch: "مثالية للعميل الذي يحتاج موقعاً متكاملاً متعدد الأقسام.",
+                    },
+                    {
+                      addon: "تهيئة الموقع لمحركات البحث (SEO) وتحسين سرعة التحميل لـ 90%+",
+                      extraPrice: "+25$",
+                      extraDays: "+ يوم واحد",
+                      pitch: "قيمة مضافة ضخمة تجعل العميل يرى موقعة متصدراً في جوجل.",
+                    },
+                    {
+                      addon: "دعم فني وتعديلات مجانية لمدة شهر كامل بعد التسليم",
+                      extraPrice: "+35$",
+                      extraDays: "0 أيام إضافية",
+                      pitch: "تمنح المشتري راحة بال تامة وترفع من تقييمك وثقته بك.",
+                    },
+                  ],
+                },
+              ],
+      },
+      overview: {
+        status: (result?.sections?.overview?.status as VollnaSectionStatus) || "good",
+        currentText: rawBio,
+        wordCount: Number(result?.sections?.overview?.wordCount) || words,
+        charCount: Number(result?.sections?.overview?.charCount) || chars,
+        suggestedStructure:
+          Array.isArray(result?.sections?.overview?.suggestedStructure) &&
+          result.sections.overview.suggestedStructure.length > 0
+            ? result.sections.overview.suggestedStructure
+            : [
+                {
+                  id: "hook",
+                  title: "مقدمة الثقة للبائع",
+                  subtitle: "سطرين لتعريف المشتري بمجال خبرتك",
+                  content: "مرحباً بك! أنا متخصص في تقديم حلول برمجية وتطوير الويب بجودة متقنة ومرونة عالية تلبي رغبتك بالكامل.",
+                },
+                {
+                  id: "unique_value",
+                  title: "ضمانات الخدمة وجودة التنفيذ",
+                  subtitle: "ما الذي يضمن للمشتري استلام عمل متقن",
+                  content: "هدفي الأول هو رضاك التام عن الخدمة؛ لذا أضمن لك كوداً نظيفاً، سرعة في التنفيذ، وتعديلات غير محدودة حتى تكون راضياً 100%.",
+                },
+                {
+                  id: "how_you_help",
+                  title: "مميزات التعامل معي",
+                  subtitle: "سرعة التنفيذ والتعديلات والتواصل",
+                  bullets: [
+                    "رد فوري وسريع على الرسائل والاستفسارات",
+                    "تسليم قبل الموعد المحدد مع شرح كامل لطريقة الاستخدام",
+                    "دعم فني مستمر بعد تسليم الطلب للإجابة عن أي سؤال",
+                  ],
+                },
+                {
+                  id: "cta",
+                  title: "دعوة لطلب الخدمة",
+                  subtitle: "شجع المشتري على التواصل قبل الطلب",
+                  content: "يسعدني تواصلك معي قبل طلب الخدمة لأقدم لك استشارة مجانية وأفضل مقترح لتنفيذ طلبك بأعلى جودة.",
+                },
+              ],
+        fullRewrittenOverview:
+          result?.sections?.overview?.fullRewrittenOverview ||
+          `أهلاً بك في حسابي الرسمي على خمسات!\n\nمتخصص في تقديم خدمات برمجية وتطوير الويب بخبرة حقيقية واهتمام بأدق التفاصيل. أحرص دائماً على أن تكون كل خدمة أقدمها إضافة حقيقية لعملائي، مع التركيز على السرعة، الأناقة، والاستقرار التقني.\n\nلماذا تطلب خدماتي بثقة؟\n• دقة في المواعيد وتسليم في الوقت المحدد بدون تأخير\n• تعديلات مستمرة حتى الرضا التام واعتماد الطلب\n• دعم فني وتواصل سريع للإجابة على كل استفساراتك\n\nتفضل بمراسلتي في أي وقت وسأكون سعيداً بخدمتك!`,
+      },
+      trust_metrics: {
+        status: sellerLevel.includes("مميز") || sellerLevel.includes("نشيط") ? "good" : "warning",
+        analysis:
+          result?.sections?.trust_metrics?.analysis ||
+          `رتبتك الحالية هي (${sellerLevel}). الوصول إلى رتبة (بائع نشيط) يتطلب إكمال 10 طلبات ناجحة بتقييم 5 نجوم وسرعة رد عالية، وهو ما يفتح لك باب بيع تطويرات حتى 100$ وظهور خدماتك في الصفحة الأولى.`,
+        badges: [sellerLevel],
+        metrics: [
+          {
+            name: "التقييم العام",
+            currentValue: String(overallRating),
+            targetValue: "100%",
+            impact: "العامل الأساسي في قرار الشراء لدى عملاء خمسات",
+          },
+          {
+            name: "رتبة البائع",
+            currentValue: sellerLevel,
+            targetValue: "بائع مميز",
+            impact: "زيادة الحد الأقصى لتطويرات الخدمات وفتح ميزات حصرية",
+          },
+          {
+            name: "سرعة الرد على الرسائل",
+            currentValue: responseSpeed,
+            targetValue: "خلال ساعة",
+            impact: "الرد السريع يحسم بيع 70% من الطلبات قبل أن يتوجه العميل لبائع آخر",
+          },
+        ],
+        tips: [
+          "احرص على فتح إشعارات تطبيق خمسات أو البريد لتجيب على رسائل المشترين في الدقائق الأولى.",
+          "قدّم دائماً قيمة إضافية صغيرة فوق الخدمة المطلوبة، فهذا يضمن لك تقييم 5 نجوم وكتابة مراجعة مديح إيجابية.",
+          "شجع العملاء دائماً على مراسلتك قبل الطلب لتحدد معهم التطوير المناسب وترفع قيمة الطلب بسلاسة.",
+        ],
+      },
+      image: {
+        status: avatarUrl ? "good" : "warning",
+        analysis:
+          result?.sections?.image?.analysis ||
+          "الهوية البصرية لحسابك ولصور الخدمات (Thumbnails) تلعب دوراً جوهرياً في زيادة نسبة النقر (CTR). احرص على صور خدمات بأبعاد 800x470 بدقة عالية وبدون نصوص مزدحمة.",
+      },
+      // Safe fallbacks for Upwork tabs
+      title: {
+        status: "good",
+        currentText: currentTitle,
+        analysis: "",
+        suggestions: [],
+      },
+      portfolio: {
+        status: "good",
+        currentCount: gigsCount,
+        alertTitle: "",
+        alertMessage: "",
+        projectIdeas: [],
+      },
+      skills: {
+        status: "good",
+        usedSlots: 5,
+        maxSlots: 20,
+        currentSkills: [],
+        analysis: "",
+        skillsToAdd: [],
+        skillsToReorder: [],
+      },
+      experience: {
+        status: "good",
+        alertTitle: "",
+        alertMessage: "",
+        rolesToAdd: [],
+        employmentHistoryNote: "",
+        employmentRewrites: [],
+        suggestedAdditions: [],
+      },
+      video: {
+        status: "good",
+        hasVideo: false,
+        analysis: "",
+        scriptSections: [],
+      },
+      catalog: {
+        status: "good",
+        currentCount: gigsCount,
+        infoBanner: "",
+        alertTitle: "",
+        alertMessage: "",
+        projectIdeas: [],
+      },
+    },
+  };
+}
+
+/**
+ * -----------------------------------------------------------------------------
+ * Universal Platform-Adaptive Profile Audit Dispatcher
+ * Dispatches to Upwork, Mostaql / Nafezly, or Khamsat while keeping Upwork 100% intact!
+ * -----------------------------------------------------------------------------
+ */
+export async function auditProfileWithAi(params: {
+  pdfBuffer?: Buffer;
+  profileData?: ExtractedProfileData;
+  rawText?: string;
+  platformType?: string;
+}): Promise<VollnaProfileAuditResult> {
+  let detectedPlatform = params.platformType;
+
+  if (!detectedPlatform) {
+    if (params.pdfBuffer) {
+      detectedPlatform = "upwork";
+    } else if (params.profileData?.platformType) {
+      detectedPlatform = params.profileData.platformType;
+    } else if (params.profileData?.sourceUrl) {
+      const lower = params.profileData.sourceUrl.toLowerCase();
+      if (lower.includes("mostaql.com")) detectedPlatform = "mostaql";
+      else if (lower.includes("khamsat.com")) detectedPlatform = "khamsat";
+      else if (lower.includes("nafezly.com")) detectedPlatform = "nafezly";
+      else if (lower.includes("upwork.com")) detectedPlatform = "upwork";
+      else detectedPlatform = "custom";
+    } else if (params.rawText) {
+      const lowerText = params.rawText.toLowerCase();
+      if (lowerText.includes("mostaql") || lowerText.includes("مستقل")) detectedPlatform = "mostaql";
+      else if (lowerText.includes("khamsat") || lowerText.includes("خمسات")) detectedPlatform = "khamsat";
+      else if (lowerText.includes("nafezly") || lowerText.includes("نفذلي")) detectedPlatform = "nafezly";
+      else detectedPlatform = "upwork";
+    } else {
+      detectedPlatform = "upwork";
+    }
+  }
+
+  // Branch A: Mostaql or Nafezly
+  if (detectedPlatform === "mostaql" || detectedPlatform === "nafezly") {
+    return auditMostaqlProfileWithAi(params, detectedPlatform);
+  }
+
+  // Branch B: Khamsat
+  if (detectedPlatform === "khamsat") {
+    return auditKhamsatProfileWithAi(params);
+  }
+
+  // Branch C: Upwork (Default - 100% Preserved)
+  return auditUpworkProfileWithAi(params);
 }

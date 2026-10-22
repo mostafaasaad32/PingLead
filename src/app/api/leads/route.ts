@@ -85,6 +85,7 @@ export async function GET(req: NextRequest) {
     const category = req.nextUrl.searchParams.get('category');
     const platform = req.nextUrl.searchParams.get('platform');
     const minScore = req.nextUrl.searchParams.get('min_score');
+    const timeWindow = req.nextUrl.searchParams.get('time_window') || '24h';
     const sortBy = req.nextUrl.searchParams.get('sort_by') || 'newest';
     const limit = parseInt(req.nextUrl.searchParams.get('limit') || '60', 10);
 
@@ -92,6 +93,13 @@ export async function GET(req: NextRequest) {
       .from('leads_pool')
       .select('*')
       .in('status', ['scored', 'dispatched', 'pending']);
+
+    // Default: Last 24 Hours (with options for 48h, 72h, or all)
+    if (timeWindow !== 'all') {
+      const hours = timeWindow === '48h' ? 48 : timeWindow === '72h' ? 72 : 24;
+      const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+      query = query.gte('published_at', cutoff);
+    }
 
     // Sort by publication date (newest first) by default
     if (sortBy === 'score') {

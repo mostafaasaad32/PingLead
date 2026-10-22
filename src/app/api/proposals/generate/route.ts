@@ -93,15 +93,15 @@ export async function POST(req: NextRequest) {
     // 1b. Market price/timeline baseline for the AI to adjust
     const pricing = proj
       ? await getProjectPricing({
-          platform: proj.platform,
-          category: proj.category,
-          budget_min: proj.budget_min,
-          budget_max: proj.budget_max,
-          currency: proj.currency,
-          bids_count: proj.bids_count,
-          bids_avg: proj.bids_avg,
-          duration_text: proj.duration_text,
-        }).catch(() => null)
+        platform: proj.platform,
+        category: proj.category,
+        budget_min: proj.budget_min,
+        budget_max: proj.budget_max,
+        currency: proj.currency,
+        bids_count: proj.bids_count,
+        bids_avg: proj.bids_avg,
+        duration_text: proj.duration_text,
+      }).catch(() => null)
       : null;
 
     if (!title && !description) {
@@ -188,20 +188,20 @@ export async function POST(req: NextRequest) {
       throw err;
     }
 
-    // 5. Save Proposal to user_project_actions (Mini-CRM) without forcing 'applied'
+    // 5. Save Proposal to user_project_actions without falsely marking it as 'saved'
     let savedActionId: string | null = null;
-    let effectiveStatus = 'saved';
+    let effectiveStatus = 'ignored';
     if (effectiveUserId && targetProjectId) {
       try {
         const { data: existing } = await (supabaseAdmin
           .from('user_project_actions') as any)
-          .select('id, status')
+          .select('id, status, notes')
           .eq('user_id', effectiveUserId)
           .eq('project_id', targetProjectId)
           .maybeSingle();
 
-        // Preserve existing status if present (e.g. applied, replied, won, saved), don't force 'applied'
-        effectiveStatus = existing?.status || 'saved';
+        // Only keep 'saved' if the project was explicitly bookmarked by the user (notes = 'user_saved')
+        effectiveStatus = existing?.status === 'saved' && existing?.notes === 'user_saved' ? 'saved' : (existing?.status || 'ignored');
 
         const { data: action, error: actionErr } = await (supabaseAdmin
           .from('user_project_actions') as any)
@@ -210,6 +210,7 @@ export async function POST(req: NextRequest) {
               user_id: effectiveUserId,
               project_id: targetProjectId,
               status: effectiveStatus,
+              notes: existing?.notes,
               generated_proposal: result.proposal,
               updated_at: new Date().toISOString(),
             },

@@ -1,52 +1,46 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import {
+  Radar,
   Sparkles,
   ExternalLink,
+  Search,
   Filter,
   CheckCircle2,
+  Clock,
+  Briefcase,
+  Layers,
+  ArrowUpDown,
+  RefreshCw,
   Copy,
   Check,
-  Zap,
-  TrendingUp,
-  Layers,
-  RefreshCw,
-  Clock,
-  DollarSign,
-  X,
-  Send,
   Bookmark,
   BookmarkCheck,
   Download,
-  BarChart3,
-  Search,
-  SlidersHorizontal,
-  ChevronDown,
-  Award,
-  Globe,
+  AlertTriangle,
+  X,
   FileText,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
   PLATFORMS_METADATA,
   CATEGORIES_METADATA,
-  type ProjectInsights,
-  extractTitleFromPostText,
-  extractDetailsFromPostText,
+  UnifiedProject,
+  ProjectInsights,
 } from "@/lib/scrapers/types";
-import { getCompetitionVerdict, getClientVerdict } from "@/lib/insights/competition";
-import type { ProjectPricing } from "@/lib/insights/pricing";
-import { isCategoryMatch } from "@/lib/filters/categorizer";
+import {
+  getCompetitionVerdict,
+  getClientVerdict,
+} from "@/lib/insights/competition";
+import { ProjectPricing } from "@/lib/insights/pricing";
 import { getPlatformTheme, PlatformBadge, PlatformLogo } from "@/lib/platform-themes";
 
 interface Lead {
   id: string;
-  project_id?: string;
+  project_id?: string | null;
   platform: string;
-  external_post_id?: string;
-  author_handle?: string;
+  external_post_id: string;
   post_text: string;
   post_url: string;
   category_slug?: string;
@@ -148,7 +142,7 @@ interface TrackedItem {
   updated_at?: string;
 }
 
-type DashboardSubTab = "live_overview" | "proposals" | "saved_jobs" | "statistics";
+type DashboardSubTab = "live_overview" | "saved_jobs" | "statistics";
 
 function formatLeadDate(dateStr: string): { relative: string; exact: string } {
   if (!dateStr) return { relative: "الآن", exact: "" };
@@ -196,14 +190,15 @@ function extractBudgetBadge(text: string): string | null {
 export default function DashboardPage() {
   const supabase = createClient();
 
-  // Tab State
+  // Tab State: Clean & Focused
   const [currentTab, setCurrentTab] = useState<DashboardSubTab>("live_overview");
-  const [statusFilter, setStatusFilter] = useState<"all" | "saved" | "applied" | "won">("all");
+
+  // Time Window Filter: Default Last 24 Hours, with options up to 48h / 72h
+  const [timeWindow, setTimeWindow] = useState<"24h" | "48h" | "72h">("24h");
 
   // Leads & CRM Data
   const [leads, setLeads] = useState<Lead[]>([]);
   const [trackedActions, setTrackedActions] = useState<Record<string, TrackedProjectAction>>({});
-  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState("all");
   const [selectedCategory, setSelectedCategory] = useState("all");
@@ -223,7 +218,7 @@ export default function DashboardPage() {
   const [generatedProposal, setGeneratedProposal] = useState("");
   const [proposalCopied, setProposalCopied] = useState(false);
 
-  // Tracker Items State (CRM Proposals & Saved)
+  // Tracker Items State (Saved Projects & Proposals)
   const [trackerItems, setTrackerItems] = useState<TrackedItem[]>([]);
   const [copiedProposalId, setCopiedProposalId] = useState<string | null>(null);
 
@@ -240,7 +235,7 @@ export default function DashboardPage() {
     return trackedActions[lead.id];
   };
 
-  // User Profile
+  // User Profile Credits
   const [userCredits, setUserCredits] = useState<number>(25);
 
   const showToast = (msg: string) => {
@@ -252,11 +247,11 @@ export default function DashboardPage() {
   const [leadsLoading, setLeadsLoading] = useState(true);
   const [trackerLoading, setTrackerLoading] = useState(true);
 
-  // 1. Fetch leads from database (optimized limit for rapid loading)
+  // 1. Fetch leads from database filtered by time window (default: last 24 hours)
   async function fetchLeads(isSilent = false) {
     if (!isSilent) setLeadsLoading(true);
     try {
-      const res = await fetch("/api/leads?limit=60&sort_by=newest");
+      const res = await fetch(`/api/leads?limit=100&time_window=${timeWindow}&sort_by=${sortBy}`);
       const data = await res.json();
       if (data.ok && Array.isArray(data.leads)) {
         setLeads(data.leads);
@@ -269,7 +264,7 @@ export default function DashboardPage() {
     }
   }
 
-  // 2. Fetch user project actions (CRM) from Supabase
+  // 2. Fetch user project actions from Supabase (strictly identifying user-saved projects)
   async function fetchActions() {
     setTrackerLoading(true);
     try {
@@ -286,12 +281,14 @@ export default function DashboardPage() {
             generated_proposal: item.generated_proposal,
             notes: item.notes,
           };
-          map[item.id] = map[item.project_id];
+          if (item.id) {
+            map[item.id] = map[item.project_id];
+          }
         });
         setTrackedActions(map);
       }
     } catch (err) {
-      console.error("Error loading CRM actions:", err);
+      console.error("Error loading saved actions:", err);
     } finally {
       setTrackerLoading(false);
     }
@@ -317,14 +314,17 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchLeads(false);
+  }, [timeWindow, sortBy]);
+
+  useEffect(() => {
     fetchActions();
     loadUserCredits();
   }, []);
 
-  // Countdown timer for auto-sync
+  // 4. Auto-refresh live feed every 15s
   useEffect(() => {
     if (!autoSync) return;
-    const timer = setInterval(() => {
+    const interval = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
           fetchLeads(true);
@@ -333,20 +333,24 @@ export default function DashboardPage() {
         return prev - 1;
       });
     }, 1000);
-    return () => clearInterval(timer);
-  }, [autoSync]);
+    return () => clearInterval(interval);
+  }, [autoSync, timeWindow, sortBy]);
 
-  // Handle Manual Scan
+  // Handle Manual Scan Trigger
   const handleScanNow = async () => {
     setScanning(true);
     try {
-      const res = await fetch("/api/scan", { method: "POST" });
+      const res = await fetch("/api/cron/ingest");
       const data = await res.json();
       if (data.ok) {
-        showToast("اكتمل سحب وتحديث المشاريع من 20 منصة بنجاح!");
-        await fetchLeads(false);
+        showToast(
+          `تم سحب الرادار بنجاح: تم جلب ${data.totalProjectsIngested || 0} مشروع جديد عبر 9 منصات.`
+        );
+        fetchLeads(false);
+        fetchActions();
+        setCountdown(15);
       } else {
-        showToast("⚠️ " + (data.error || "خطأ أثناء السحب"));
+        showToast("اكتمل المسح دون إضافة مشاريع جديدة.");
       }
     } catch (e) {
       showToast("حدث خطأ في الاتصال بالرادار.");
@@ -355,22 +359,71 @@ export default function DashboardPage() {
     }
   };
 
-  // Handle Save / Bookmark Lead
-  const handleToggleSaveLead = async (lead: Lead) => {
-    const targetId = lead.project_id || lead.id;
-    const currentAction = getLeadAction(lead);
-    const newStatus = currentAction?.status === "saved" ? "ignored" : "saved";
+  // Helper to extract clean details for display
+  function extractDetailsFromPostText(text: string): string {
+    if (!text) return "";
+    let clean = text;
+    clean = clean.replace(/الميزانية:[^\n\r]+/gi, "");
+    clean = clean.replace(/التفاصيل:\s*/gi, "");
+    clean = clean.replace(/^(مشروع جديد:|[^\n\r]+)\r?\n/i, "");
+    return clean.trim();
+  }
 
-    // Optimistic update
+  function extractTitleFromPostText(text: string): string {
+    if (!text) return "";
+    const firstLine = text.split("\n")[0].trim();
+    return firstLine.replace(/^(مشروع جديد:\s*|طلب عمل حر:\s*)/i, "");
+  }
+
+  // Unified Save / Un-save toggle
+  // Explicitly sets notes: "user_saved" when saving, or un-saves when clicked again
+  const handleToggleSaveLead = async (leadOrItem: any) => {
+    const targetId = leadOrItem.project_id || leadOrItem.id;
+    const currentAction = getLeadAction(leadOrItem);
+    const isCurrentlySaved = currentAction?.status === "saved" && currentAction?.notes === "user_saved";
+    const newStatus = isCurrentlySaved ? "ignored" : "saved";
+
+    // Optimistic UI updates
     setTrackedActions((prev) => ({
       ...prev,
       [targetId]: {
         id: currentAction?.id || targetId,
         project_id: targetId,
         status: newStatus as any,
-        notes: newStatus === "saved" ? "user_saved" : undefined,
+        notes: newStatus === "saved" ? "user_saved" : null,
       },
     }));
+
+    setTrackerItems((prev) => {
+      if (newStatus === "saved") {
+        const existing = prev.find((item) => item.project_id === targetId || item.id === targetId);
+        if (existing) {
+          return prev.map((item) =>
+            item.project_id === targetId || item.id === targetId
+              ? { ...item, status: "saved", notes: "user_saved" }
+              : item
+          );
+        } else {
+          const newItem: TrackedItem = {
+            id: targetId,
+            project_id: targetId,
+            status: "saved",
+            notes: "user_saved",
+            title: leadOrItem.title || extractTitleFromPostText(leadOrItem.post_text || "") || "مشروع عمل حر",
+            description: leadOrItem.description || extractDetailsFromPostText(leadOrItem.post_text || "") || "",
+            url: leadOrItem.url || leadOrItem.post_url || "",
+            platform: leadOrItem.platform || "mostaql",
+            category: leadOrItem.category || leadOrItem.category_slug || "web_dev",
+            budget: leadOrItem.budget || extractBudgetBadge(leadOrItem.post_text || "") || null,
+            published_at: leadOrItem.published_at || new Date().toISOString(),
+          };
+          return [newItem, ...prev];
+        }
+      } else {
+        // Unsaved: remove from saved list immediately
+        return prev.filter((item) => item.project_id !== targetId && item.id !== targetId);
+      }
+    });
 
     try {
       const res = await fetch("/api/tracker", {
@@ -386,51 +439,11 @@ export default function DashboardPage() {
       if (res.ok) {
         showToast(
           newStatus === "saved"
-            ? "تم حفظ المشروع في قائمة المشاريع المحفوظة بنجاح"
-            : "تمت إزالة المشروع من المحفوظات"
+            ? "تم حفظ المشروع في قائمة المشاريع المحفوظة بنجاح 📌"
+            : "تمت إزالة المشروع من قائمة المحفوظات"
         );
         fetchActions();
       }
-    } catch (e) {
-      fetchActions();
-    }
-  };
-
-  // Handle Change Project Status (Applied, Replied, Won, etc.)
-  const handleChangeStatus = async (
-    targetId: string,
-    newStatus: "matched" | "saved" | "applied" | "replied" | "won" | "ignored"
-  ) => {
-    setTrackedActions((prev) => ({
-      ...prev,
-      [targetId]: {
-        ...(prev[targetId] || { id: targetId, project_id: targetId }),
-        status: newStatus as any,
-      },
-    }));
-
-    setTrackerItems((prev) =>
-      prev.map((item) =>
-        item.project_id === targetId || item.id === targetId ? { ...item, status: newStatus } : item
-      )
-    );
-
-    try {
-      await fetch("/api/tracker", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: targetId, status: newStatus }),
-      });
-      const statusLabels: Record<string, string> = {
-        matched: "مسودة / مطابق",
-        saved: "محفوظ",
-        applied: "تم التقديم",
-        replied: "العميل رد 💬",
-        won: "تم الفوز 🎉",
-        ignored: "مستبعد",
-      };
-      showToast(`تم تحديث حالة المشروع إلى: ${statusLabels[newStatus] || newStatus}`);
-      fetchActions();
     } catch (e) {
       fetchActions();
     }
@@ -462,13 +475,13 @@ export default function DashboardPage() {
           setUserCredits(data.remaining_credits);
         }
         const targetId = lead.project_id || lead.id;
-        // Do NOT force status to applied! Preserve draft/saved status
         setTrackedActions((prev) => ({
           ...prev,
           [targetId]: {
             id: data.action_id || targetId,
             project_id: targetId,
-            status: data.status || prev[targetId]?.status || "saved",
+            status: prev[targetId]?.status || "ignored",
+            notes: prev[targetId]?.notes,
             generated_proposal: data.proposal,
           },
         }));
@@ -494,30 +507,25 @@ export default function DashboardPage() {
 
   // Export CSV Functionality (with UTF-8 BOM for Arabic)
   const handleExportCSV = () => {
-    const listToExport =
-      currentTab === "proposals"
-        ? filteredProposals
-        : currentTab === "saved_jobs"
-        ? filteredSavedJobs
-        : filteredLiveLeads;
+    const listToExport = currentTab === "saved_jobs" ? filteredSavedJobs : filteredLiveLeads;
 
     if (listToExport.length === 0) {
       alert("لا توجد مشاريع لتصديرها في التصفية الحالية.");
       return;
     }
 
-    const headers = ["المنصة", "عنوان المشروع", "الميزانية", "تاريخ النشر", "رابط المشروع", "الحالة"];
+    const headers = ["المنصة", "عنوان المشروع", "الميزانية", "تاريخ النشر", "رابط المشروع", "محفوظ"];
     const rows = listToExport.map((item: any) => {
       const title = (item.title || extractTitleFromPostText(item.post_text || "")).replace(/"/g, '""');
       const budget = item.budget || extractBudgetBadge(item.post_text || "") || "";
-      const status = item.status || getLeadAction(item)?.status || "new";
+      const isSaved = getLeadAction(item)?.status === "saved" && getLeadAction(item)?.notes === "user_saved";
       return [
         `"${item.platform}"`,
         `"${title}"`,
         `"${budget}"`,
         `"${item.published_at || item.created_at || ""}"`,
         `"${item.url || item.post_url || ""}"`,
-        `"${status}"`,
+        `"${isSaved ? "نعم" : "لا"}"`,
       ].join(",");
     });
 
@@ -538,11 +546,6 @@ export default function DashboardPage() {
 
   // Filtered Leads from live radar feed
   const filteredLiveLeads = leads.filter((lead) => {
-    const action = getLeadAction(lead);
-
-    if (statusFilter !== "all" && action?.status !== statusFilter) {
-      return false;
-    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       if (!lead.post_text.toLowerCase().includes(q)) return false;
@@ -559,27 +562,9 @@ export default function DashboardPage() {
     return true;
   });
 
-  // Filtered Proposals (from CRM tracker items)
-  const filteredProposals = trackerItems.filter((item) => {
-    // Only proposals that were applied/replied/won OR have a generated_proposal
-    if (!item.generated_proposal && !["applied", "replied", "won"].includes(item.status)) return false;
-
-    if (statusFilter !== "all" && item.status !== statusFilter) return false;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchTitle = item.title?.toLowerCase().includes(q);
-      const matchDesc = item.description?.toLowerCase().includes(q);
-      const matchProp = item.generated_proposal?.toLowerCase().includes(q);
-      if (!matchTitle && !matchDesc && !matchProp) return false;
-    }
-    if (selectedPlatform !== "all" && item.platform !== selectedPlatform) return false;
-    if (selectedCategory !== "all" && !isCategoryMatch(item.category, selectedCategory)) return false;
-    return true;
-  });
-
-  // Filtered Saved Jobs (from CRM tracker items)
+  // Filtered Saved Jobs: Strictly projects explicitly saved by the user (status = saved & notes = user_saved)
   const filteredSavedJobs = trackerItems.filter((item) => {
-    if (item.status !== "saved") return false;
+    if (item.status !== "saved" || item.notes !== "user_saved") return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       if (!item.title?.toLowerCase().includes(q) && !item.description?.toLowerCase().includes(q)) return false;
@@ -591,11 +576,11 @@ export default function DashboardPage() {
 
   // Calculate quick stats from live data
   const totalLeads = leads.length;
-  const savedCount = trackerItems.filter((a) => a.status === "saved").length;
-  const appliedCount = trackerItems.filter((a) => ["applied", "replied", "won"].includes(a.status)).length;
+  const savedCount = trackerItems.filter((a) => a.status === "saved" && a.notes === "user_saved").length;
+  const proposalsCount = trackerItems.filter((a) => Boolean(a.generated_proposal)).length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" dir="rtl">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 left-6 z-50 p-4 rounded-2xl bg-slate-900 text-white text-xs font-bold shadow-2xl flex items-center gap-3 border border-emerald-500/30 animate-in fade-in slide-in-from-bottom-3 duration-200">
@@ -606,13 +591,11 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Vollna Master Sub-Tabs Header */}
+      {/* Vollna Master Sub-Tabs Header: Clean 3 Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-slate-200">
-        {/* Vollna 4 Sub-Tabs */}
         <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto">
           {[
             { id: "live_overview", label: "الرادار المباشر", count: totalLeads },
-            { id: "proposals", label: "العروض المقدمة", count: appliedCount },
             { id: "saved_jobs", label: "المشاريع المحفوظة", count: savedCount },
             { id: "statistics", label: "الإحصائيات والتقارير" },
           ].map((tab) => (
@@ -665,7 +648,7 @@ export default function DashboardPage() {
             className="p-2 sm:px-3 sm:py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold flex items-center gap-1.5 transition text-xs shadow-xs"
           >
             <Download className="w-3.5 h-3.5 text-slate-600" />
-            <span className="hidden sm:inline">تصدير كملف CSV</span>
+            <span className="hidden sm:inline">تصدير CSV</span>
           </button>
         </div>
       </div>
@@ -674,32 +657,32 @@ export default function DashboardPage() {
       {currentTab === "statistics" ? (
         <div className="space-y-5 animate-in fade-in duration-200">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl">
-              <span className="text-xs font-bold text-slate-500">إجمالي المشاريع في المستودع</span>
+            <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl shadow-xs">
+              <span className="text-xs font-bold text-slate-500">المشاريع الطازجة في الرادار</span>
               <div className="text-2xl font-black text-slate-900 mt-2">{totalLeads}</div>
-              <p className="text-[11px] text-slate-400 mt-1">تحديث لحظي من 9 منصات عربية وعالمية</p>
+              <p className="text-[11px] text-slate-400 mt-1">المعروضة ضمن نافذة {timeWindow === "24h" ? "آخر 24 ساعة" : timeWindow === "48h" ? "آخر 48 ساعة" : "آخر 72 ساعة"}</p>
             </div>
-            <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl">
-              <span className="text-xs font-bold text-slate-500">عروض تم توليدها</span>
-              <div className="text-2xl font-black text-emerald-700 mt-2">{appliedCount}</div>
-              <p className="text-[11px] text-slate-400 mt-1">محفوظة في جدول user_project_actions</p>
+            <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl shadow-xs">
+              <span className="text-xs font-bold text-slate-500">المشاريع المحفوظة (Saved)</span>
+              <div className="text-2xl font-black text-amber-600 mt-2">📌 {savedCount}</div>
+              <p className="text-[11px] text-slate-400 mt-1">مشاريع قمت بحفظها يدوياً للمراجعة</p>
             </div>
-            <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl">
-              <span className="text-xs font-bold text-slate-500">مشاريع محفوظة (Saved)</span>
-              <div className="text-2xl font-black text-slate-900 mt-2">{savedCount}</div>
-              <p className="text-[11px] text-slate-400 mt-1">جاهزة للمراجعة والتقديم</p>
+            <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl shadow-xs">
+              <span className="text-xs font-bold text-slate-500">مسودات عروض تم توليدها</span>
+              <div className="text-2xl font-black text-emerald-700 mt-2">⚡ {proposalsCount}</div>
+              <p className="text-[11px] text-slate-400 mt-1">محفوظة ومستثناة من الحذف التلقائي</p>
             </div>
-            <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl">
+            <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl shadow-xs">
               <span className="text-xs font-bold text-slate-500">رصيد عروض AI المتاح</span>
-              <div className="text-2xl font-black text-emerald-600 mt-2">⚡ {userCredits}</div>
-              <p className="text-[11px] text-slate-400 mt-1">تخصم نقطة واحدة لكل عرض</p>
+              <div className="text-2xl font-black text-emerald-600 mt-2">✨ {userCredits}</div>
+              <p className="text-[11px] text-slate-400 mt-1">تخصم نقطة واحدة لكل عرض ذكي</p>
             </div>
           </div>
         </div>
       ) : (
-        /* Render Overview, Proposals, or Saved Jobs */
+        /* Render Overview or Saved Jobs */
         <div className="space-y-4">
-          {/* Search & Platform Filter Bar */}
+          {/* Search, Categories, Platforms & Time Window Filter Bar */}
           <div className="vollna-card p-4 bg-white border border-slate-200 rounded-2xl shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
             <div className="relative w-full md:w-72">
               <input
@@ -750,25 +733,28 @@ export default function DashboardPage() {
                 </optgroup>
               </select>
 
-              {/* Status Filter Tabs */}
+              {/* Time Window Filter (Default: Last 24 Hours, options up to 48h / 72h) */}
               <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200">
+                <span className="text-[11px] font-bold text-slate-500 px-2 flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>النافذة:</span>
+                </span>
                 {[
-                  { id: "all", label: "الكل" },
-                  { id: "saved", label: "محفوظ" },
-                  { id: "applied", label: "تم التقديم" },
-                  { id: "won", label: "فوز 🎉" },
-                ].map((s) => (
+                  { id: "24h", label: "آخر 24 ساعة (افتراضي)" },
+                  { id: "48h", label: "آخر 48 ساعة" },
+                  { id: "72h", label: "آخر 72 ساعة" },
+                ].map((w) => (
                   <button
-                    key={s.id}
+                    key={w.id}
                     type="button"
-                    onClick={() => setStatusFilter(s.id as any)}
+                    onClick={() => setTimeWindow(w.id as any)}
                     className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition ${
-                      statusFilter === s.id
-                        ? "bg-white text-slate-900 shadow-xs"
-                        : "text-slate-500 hover:text-slate-900"
+                      timeWindow === w.id
+                        ? "bg-slate-900 text-white shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
                     }`}
                   >
-                    {s.label}
+                    {w.label}
                   </button>
                 ))}
               </div>
@@ -781,26 +767,24 @@ export default function DashboardPage() {
               <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
               <p className="text-xs text-slate-500">جاري تحميل البيانات من Supabase...</p>
             </div>
-          ) : currentTab === "proposals" || currentTab === "saved_jobs" ? (
-            /* Proposals or Saved Jobs list from CRM Tracker */
-            (currentTab === "proposals" ? filteredProposals : filteredSavedJobs).length === 0 ? (
-              <div className="vollna-card p-12 text-center bg-white border border-slate-200 rounded-2xl">
-                <p className="text-sm font-bold text-slate-700">
-                  {currentTab === "proposals"
-                    ? "لا توجد عروض مقدمة تطابق هذه التصفية حالياً."
-                    : "لا توجد مشاريع محفوظة حالياً."}
-                </p>
-                <p className="text-xs text-slate-400 mt-1">
-                  {currentTab === "proposals"
-                    ? "يمكنك توليد عرض ذكي لأي مشروع من الرادار وسيقوم النظام بحفظه هنا تلقائياً."
-                    : "اضغط على أيقونة الإشارة المرجعية (حفظ) لأي مشروع في الرادار ليظهر هنا فوراً."}
+          ) : currentTab === "saved_jobs" ? (
+            /* Saved Jobs list */
+            filteredSavedJobs.length === 0 ? (
+              <div className="vollna-card p-12 text-center bg-white border border-slate-200 rounded-2xl shadow-xs">
+                <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-3 border border-amber-200/60">
+                  <Bookmark className="w-6 h-6" />
+                </div>
+                <p className="text-sm font-bold text-slate-800">لا توجد مشاريع محفوظة حالياً.</p>
+                <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
+                  عندما يعجبك أي مشروع في الرادار المباشر، اضغط على زر الحفظ (🔖) ليتم حفظه هنا فوراً للرجوع إليه وتقديم عرضك.
                 </p>
               </div>
             ) : (
               <div className="space-y-4">
-                {(currentTab === "proposals" ? filteredProposals : filteredSavedJobs).map((item) => {
+                {filteredSavedJobs.map((item) => {
                   const dateInfo = formatLeadDate(item.published_at || item.tracked_at || "");
                   const theme = getPlatformTheme(item.platform);
+
                   return (
                     <div
                       key={item.id}
@@ -810,7 +794,7 @@ export default function DashboardPage() {
                       <div className={`h-1.5 w-full bg-gradient-to-r ${theme.topStripeGradient}`} />
 
                       <div className="p-5 sm:p-6">
-                        {/* Top Row: Platform Badge with Logo, Budget, Date, and Status Badge */}
+                        {/* Top Row: Platform Badge with Logo, Budget, Date, and Bookmark */}
                         <div className="flex items-center justify-between gap-3 mb-3">
                           <div className="flex items-center gap-2 flex-wrap">
                             <PlatformBadge platform={item.platform} />
@@ -826,32 +810,21 @@ export default function DashboardPage() {
                               <span>{dateInfo.relative}</span>
                             </span>
 
-                            {item.status === "applied" && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200/60">
-                                ✓ تم التقديم
-                              </span>
-                            )}
-                            {item.status === "replied" && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                                💬 العميل رد
-                              </span>
-                            )}
-                            {item.status === "won" && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/60">
-                                🎉 تم الفوز
-                              </span>
-                            )}
-                            {item.status === "saved" && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                                📌 محفوظ
-                              </span>
-                            )}
-                            {item.status === "matched" && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200/60">
-                                ⚡ مسودة عرض
-                              </span>
-                            )}
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/60 flex items-center gap-1">
+                              <span>📌</span>
+                              <span>محفوظ</span>
+                            </span>
                           </div>
+
+                          {/* Bookmark Toggle (Click to Unsave) */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSaveLead(item)}
+                            title="إلغاء حفظ هذا المشروع"
+                            className="p-1.5 rounded-lg border bg-amber-50 border-amber-200 text-amber-600 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition"
+                          >
+                            <BookmarkCheck className="w-4 h-4" />
+                          </button>
                         </div>
 
                         {/* Title */}
@@ -868,12 +841,12 @@ export default function DashboardPage() {
 
                         {/* Description Snippet */}
                         {item.description && (
-                          <p className="text-xs text-slate-600 leading-relaxed line-clamp-2 mb-3 whitespace-pre-line">
+                          <p className="text-xs text-slate-600 leading-relaxed line-clamp-3 mb-3 whitespace-pre-line">
                             {item.description}
                           </p>
                         )}
 
-                        {/* Generated Proposal Accordion / Box */}
+                        {/* Generated Proposal Accordion / Box if present */}
                         {item.generated_proposal && (
                           <div className="my-3.5 p-4 rounded-2xl bg-slate-50 border border-slate-200">
                             <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-slate-200/60">
@@ -919,33 +892,13 @@ export default function DashboardPage() {
                               <ExternalLink className="w-3 h-3 opacity-60" />
                             </a>
 
-                            {item.status !== "applied" && item.status !== "won" && item.status !== "replied" && (
-                              <button
-                                type="button"
-                                onClick={() => handleChangeStatus(item.project_id, "applied")}
-                                className="py-2 px-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-xs"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>قدّمت بالفعل على المنصة ✓</span>
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Status Selector Dropdown */}
-                          <div className="flex items-center gap-1 self-end sm:self-auto text-xs">
-                            <span className="text-[11px] text-slate-400">الحالة:</span>
-                            <select
-                              value={item.status}
-                              onChange={(e) => handleChangeStatus(item.project_id, e.target.value as any)}
-                              className="px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 font-semibold focus:outline-none focus:border-emerald-600"
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSaveLead(item)}
+                              className="py-2 px-3 rounded-xl border border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-600 font-bold text-xs transition"
                             >
-                              <option value="matched">مسودة / مطابق</option>
-                              <option value="saved">محفوظ 📌</option>
-                              <option value="applied">تم التقديم ✓</option>
-                              <option value="replied">العميل رد 💬</option>
-                              <option value="won">تم الفوز 🎉</option>
-                              <option value="ignored">مستبعد ✕</option>
-                            </select>
+                              إلغاء الحفظ
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -957,9 +910,9 @@ export default function DashboardPage() {
           ) : (
             /* Live Overview Cards Feed (Filtered Leads) */
             filteredLiveLeads.length === 0 ? (
-              <div className="vollna-card p-12 text-center bg-white border border-slate-200 rounded-2xl">
+              <div className="vollna-card p-12 text-center bg-white border border-slate-200 rounded-2xl shadow-xs">
                 <p className="text-sm font-bold text-slate-700">لا توجد مشاريع تطابق هذه التصفية حالياً.</p>
-                <p className="text-xs text-slate-400 mt-1">جرّب اختيار "كافة المنصات" أو إزالة شروط البحث.</p>
+                <p className="text-xs text-slate-400 mt-1">جرّب توسيع النافذة الزمنية إلى "آخر 48 ساعة" أو اختيار "كافة المنصات".</p>
               </div>
             ) : (
               <div className="space-y-3.5">
@@ -968,9 +921,7 @@ export default function DashboardPage() {
                   const budgetBadge = extractBudgetBadge(lead.post_text);
                   const firstLine = extractTitleFromPostText(lead.post_text);
                   const action = getLeadAction(lead);
-                  const isSaved = action?.status === "saved";
-                  const isApplied = action?.status === "applied";
-                  const targetId = lead.project_id || lead.id;
+                  const isSaved = action?.status === "saved" && action?.notes === "user_saved";
                   const theme = getPlatformTheme(lead.platform);
 
                   return (
@@ -982,7 +933,7 @@ export default function DashboardPage() {
                       <div className={`h-1.5 w-full bg-gradient-to-r ${theme.topStripeGradient}`} />
 
                       <div className="p-5 sm:p-6">
-                        {/* Top Row: Platform Badge with Logo, Time, Budget, and Save Icon */}
+                        {/* Top Row: Platform Badge with Logo, Time, Budget, and Save Bookmark Icon */}
                         <div className="flex items-center justify-between gap-3 mb-3">
                           <div className="flex items-center gap-2 flex-wrap">
                             <PlatformBadge platform={lead.platform} />
@@ -1001,19 +952,10 @@ export default function DashboardPage() {
                               <span>{dateInfo.relative}</span>
                             </span>
 
-                            {isApplied && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200/60">
-                                ✓ تم التقديم
-                              </span>
-                            )}
-                            {action?.status === "replied" && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                                💬 العميل رد
-                              </span>
-                            )}
-                            {action?.status === "won" && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/60">
-                                🎉 تم الفوز
+                            {isSaved && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/60 flex items-center gap-1">
+                                <span>📌</span>
+                                <span>محفوظ</span>
                               </span>
                             )}
                           </div>
@@ -1022,11 +964,11 @@ export default function DashboardPage() {
                             <button
                               type="button"
                               onClick={() => handleToggleSaveLead(lead)}
-                              title={isSaved ? "إلغاء الحفظ" : "حفظ المشروع"}
+                              title={isSaved ? "إلغاء الحفظ من المفضلة" : "حفظ المشروع في المشاريع المحفوظة"}
                               className={`p-1.5 rounded-lg border transition ${
                                 isSaved
-                                  ? "bg-amber-50 border-amber-200 text-amber-600"
-                                  : "border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+                                  ? "bg-amber-50 border-amber-200 text-amber-600 shadow-2xs"
+                                  : "border-slate-200 text-slate-400 hover:text-slate-700 hover:bg-slate-50"
                               }`}
                             >
                               {isSaved ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
@@ -1077,21 +1019,19 @@ export default function DashboardPage() {
                             </a>
                           </div>
 
-                          {/* Status Selector */}
-                          <div className="flex items-center gap-1 self-end sm:self-auto text-xs">
-                            <span className="text-[11px] text-slate-400">الحالة:</span>
-                            <select
-                              value={action?.status || "new"}
-                              onChange={(e) => handleChangeStatus(targetId, e.target.value as any)}
-                              className="px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 font-semibold focus:outline-none focus:border-emerald-600"
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSaveLead(lead)}
+                              className={`py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                                isSaved
+                                  ? "bg-amber-50 text-amber-700 border border-amber-200"
+                                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-50 border border-transparent"
+                              }`}
                             >
-                              <option value="new">جديد</option>
-                              <option value="saved">محفوظ</option>
-                              <option value="applied">تم التقديم</option>
-                              <option value="replied">العميل رد 💬</option>
-                              <option value="won">تم الفوز 🎉</option>
-                              <option value="ignored">مستبعد</option>
-                            </select>
+                              {isSaved ? <BookmarkCheck className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
+                              <span>{isSaved ? "محفوظ في قائمتك" : "حفظ المشروع"}</span>
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -1146,7 +1086,7 @@ export default function DashboardPage() {
 
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100">
                   <span className="text-[11px] text-slate-400">
-                    العرض محفوظ كمسودة. اضغط "قدّمت بالفعل" بعد إرساله على المنصة.
+                    يمكنك نسخ العرض والانتقال للمنصة لإرساله فوراً.
                   </span>
 
                   <div className="flex items-center gap-2 flex-wrap">
@@ -1159,30 +1099,24 @@ export default function DashboardPage() {
                       <span>{proposalCopied ? "تم النسخ!" : "نسخ نص العرض"}</span>
                     </button>
 
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSaveLead(proposalModalLead)}
+                      className="py-2 px-3.5 rounded-xl border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs flex items-center gap-1.5 transition shadow-2xs"
+                    >
+                      <Bookmark className="w-3.5 h-3.5" />
+                      <span>حفظ في المشاريع المحفوظة</span>
+                    </button>
+
                     <a
                       href={proposalModalLead.post_url}
                       target="_blank"
                       rel="noreferrer"
-                      className="py-2 px-3.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition"
+                      className="py-2 px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-xs"
                     >
                       <span>الانتقال للمنصة</span>
                       <ExternalLink className="w-3 h-3 text-slate-400" />
                     </a>
-
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!proposalModalLead) return;
-                        const targetId = proposalModalLead.project_id || proposalModalLead.id;
-                        await handleChangeStatus(targetId, "applied");
-                        showToast("🎉 تم تسجيل التقديم بنجاح في متتبع العروض!");
-                        setProposalModalLead(null);
-                      }}
-                      className="py-2 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>قدّمت بالفعل على المنصة ✓</span>
-                    </button>
                   </div>
                 </div>
               </div>
@@ -1192,4 +1126,30 @@ export default function DashboardPage() {
       )}
     </div>
   );
+}
+
+// Category matching helper
+function isCategoryMatch(itemCategory?: string | null, targetCategory?: string): boolean {
+  if (!itemCategory || !targetCategory || targetCategory === "all") return true;
+  if (itemCategory === targetCategory) return true;
+
+  const aliases: Record<string, string[]> = {
+    web_mobile_dev: ["web_mobile_dev", "web_dev"],
+    web_dev: ["web_mobile_dev", "web_dev"],
+    ui_ux_graphic: ["ui_ux_graphic", "ui_ux", "design"],
+    ui_ux: ["ui_ux_graphic", "ui_ux", "design"],
+    design: ["ui_ux_graphic", "ui_ux", "design"],
+    digital_marketing_seo: ["digital_marketing_seo", "marketing"],
+    marketing: ["digital_marketing_seo", "marketing"],
+    business_accounting_legal: ["business_accounting_legal", "accounting", "business"],
+    accounting: ["business_accounting_legal", "accounting", "business"],
+    business: ["business_accounting_legal", "accounting", "business"],
+    writing_translation: ["writing_translation", "writing"],
+    writing: ["writing_translation", "writing"],
+    sales_customer_support: ["sales_customer_support", "support"],
+    support: ["sales_customer_support", "support"],
+  };
+
+  const valid = aliases[targetCategory] || [targetCategory];
+  return valid.includes(itemCategory);
 }
