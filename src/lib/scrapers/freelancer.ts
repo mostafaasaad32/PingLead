@@ -77,26 +77,10 @@ export async function scrapeFreelancerCategory(
         .trim();
       const cat = classifyProjectCategory(`${p.title} ${description}`, jobHint || categorySlug);
 
-      const COUNTRY_BY_CODE: Record<string, string> = {
-        US: 'الولايات المتحدة (USD)',
-        IN: 'الهند (INR)',
-        GB: 'بريطانيا (GBP)',
-        UK: 'بريطانيا (GBP)',
-        EU: 'الاتحاد الأوروبي (EUR)',
-        CA: 'كندا (CAD)',
-        AU: 'أستراليا (AUD)',
-        AE: 'الإمارات (AED)',
-        SA: 'السعودية (SAR)',
-        EG: 'مصر (EGP)',
-        SG: 'سنغافورة (SGD)',
-        NZ: 'نيوزيلندا (NZD)',
-        DE: 'ألمانيا (EUR)',
-      };
 
-      const detectedCountry =
-        p.location?.country?.name ||
-        (p.currency?.country && COUNTRY_BY_CODE[p.currency.country]) ||
-        (p.currency?.name ? `دولي (${p.currency.name})` : null);
+      // The project's currency is not the client's country (Indian clients often post in USD),
+      // and the client-country filter relies on this value: use the stated location only
+      const detectedCountry = p.location?.country?.name || null;
 
       const authorName = p.upgrades?.featured
         ? 'عميل مميز (Featured)'

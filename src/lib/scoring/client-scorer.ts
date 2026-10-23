@@ -214,70 +214,42 @@ export function buildPlatformMetricsChips(params: {
     ];
   }
 
-  // 4. Khamsat: 100% upfront buyer escrow in Hsoub
+  // 4. Khamsat buyer requests: the buyer pays only when they order a service, nothing is prepaid
   if (p.includes("khamsat")) {
     return [
       {
-        label: "الضمان المالي",
-        value: "دفع مسبق 100%",
-        subtext: "مجمد في رصيد حسوب",
-        tone: "positive",
-        icon: "🔒",
-      },
-      {
         label: "نوع الطلب",
-        value: "طلب خدمة مخصص",
-        subtext: "المشتري جاهز للتنفيذ",
-        tone: "positive",
+        value: "طلب خدمة",
+        subtext: "الدفع بيتم لما المشتري يطلب خدمتك",
+        tone: "neutral",
         icon: "🛒",
       },
       {
-        label: "أمان المستقل",
-        value: "محمي بحسوب 100%",
-        subtext: "استلام الأرباح فورياً",
-        tone: "positive",
-        icon: "🛡️",
-      },
-      {
-        label: "سرعة التنفيذ",
-        value: "تنفيذ فوري مطلوب",
-        subtext: "حدد تفاصيل التسليم بدقة",
-        tone: "accent",
-        icon: "⚡",
+        label: "بيانات المشتري",
+        value: "مش متاحة",
+        subtext: "خمسات مش بيعرض سجل المشتري في الطلبات",
+        tone: "neutral",
+        icon: "👤",
       },
     ];
   }
 
-  // 5. Corporate boards: Baeed, RemoteOK, WWR
+  // 5. Job boards: Baeed, RemoteOK, WWR. They publish no data about the employer.
   if (p.includes("baeed") || p.includes("remoteok") || p.includes("wwr")) {
     return [
       {
-        label: "جهة التوظيف",
-        value: "شركة رسمية موثقة",
-        subtext: "مؤسسة معتمدة تجارياً",
-        tone: "positive",
-        icon: "🏢",
-      },
-      {
-        label: "رسوم الإعلان",
-        value: "مسددة ($100-$300)",
-        subtext: "إثبات قاطع للجدية والملاءة",
-        tone: "positive",
-        icon: "💳",
-      },
-      {
-        label: "طبيعة التعاقد",
-        value: "وظيفة عن بعد مستقرة",
-        subtext: "عقد عمل طويل الأجل",
-        tone: "positive",
+        label: "النوع",
+        value: "وظيفة",
+        subtext: "مش مشروع فريلانس",
+        tone: "neutral",
         icon: "💼",
       },
       {
-        label: "موثوقية الميزانية",
-        value: "راتب / ميزانية معتمدة",
-        subtext: "دفعات دورية منظمة",
-        tone: "positive",
-        icon: "🛡️",
+        label: "صاحب العمل",
+        value: "مفيش بيانات",
+        subtext: "الموقع مش بيعرض سجل الشركة",
+        tone: "neutral",
+        icon: "🏢",
       },
     ];
   }
@@ -409,15 +381,11 @@ export function calculateClientScore(jobData: ClientJobData | any): ClientEvalua
 
   // --- PILLAR 1: PLATFORM FINANCIAL SECURITY & ESCROW ---
   if (isCorporatePlatform) {
-    // Companies posting on Baeed / RemoteOK / WWR pay $100-$300 to list their openings
-    score = Math.max(score, 8.5);
-    greenFlags.push("شركة رسمية موثقة قامت بسداد رسوم إعلان التوظيف ($100-$300) - مصداقية عالية وميزانية معتمدة");
-    greenFlags.push("عقد عمل عن بعد بميزانية مجزية وفرصة استقرار مهني طويل الأمد");
+    // Job boards publish nothing about the employer: no bonus, and no claims we can't back
+    redFlags.push("وظيفة من موقع توظيف: مفيش بيانات عن صاحب العمل، اتأكد من الشركة قبل ما تقدّم");
   } else if (isKhamsat) {
-    // Khamsat buyers have funds held 100% in Hsoub escrow upon purchase
-    score = Math.max(score, 7.5);
-    greenFlags.push("طلب خدمة مباشر في خمسات - الدفع مسبق ومضمون 100% لدى إدارة حسوب");
-    greenFlags.push("المشتري جاهز للشراء والتنفيذ الفوري للخدمة دون مخاطرة مالية");
+    // Buyer requests are not prepaid: the buyer pays when they order a service
+    greenFlags.push("طلب على خمسات: الدفع بيتم ويتحجز في حسوب لما المشتري يطلب خدمتك");
   } else if (isMostaql) {
     score += 1.0; // Hsoub financial escrow protection
     if (hireRate !== undefined) {
@@ -508,7 +476,8 @@ export function calculateClientScore(jobData: ClientJobData | any): ClientEvalua
   } else if (descLength >= 100) {
     score += 0.5;
     greenFlags.push("وصف محدد ومفهوم لمتطلبات المشروع");
-  } else if (descLength > 0 && descLength < 60) {
+  } else if (descLength > 0 && descLength < 60 && !isKhamsat) {
+    // Khamsat requests are one-liners by design: shortness says nothing about the buyer there
     score -= 1.5;
     redFlags.push("وصف المشروع مبهم جداً وقصير للغاية وقد يدل على عميل غير جاد");
   }
@@ -582,19 +551,29 @@ export function calculateClientScore(jobData: ClientJobData | any): ClientEvalua
     greenFlags.push("فرصة تنافسية واعدة لتقديم عرض متميز وبناء سابقة أعمال");
   }
 
-  // 3. Clamping Score: between 1.0 and 10.0 (rounded to 1 decimal place)
-  const finalScore = Math.min(10.0, Math.max(1.0, Math.round(score * 10) / 10));
+  // 3. Clamping Score: between 1.0 and 10.0 (rounded to 1 decimal place).
+  // Without any client history (hire rate or rating) a clear post can't make a client
+  // "excellent": the score is capped, so the badge reflects what we actually know.
+  const hasHistory = hireRate !== undefined || clientRating !== undefined;
+  const NO_HISTORY_CAP = 7.0;
+  let finalScore = Math.min(10.0, Math.max(1.0, Math.round(score * 10) / 10));
+  if (!hasHistory) finalScore = Math.min(finalScore, NO_HISTORY_CAP);
 
-  // 4. Badges & Labels based on User Tiers:
+  // 4. Badges & Labels: only claim what the data shows
   let badge: ClientEvaluation["badge"] = "good";
   let labelAr = "عميل متوسط - فرصة مناسبة";
 
   if (finalScore >= 8.0) {
     badge = "excellent";
-    labelAr = "عميل موثوق - يوظف بانتظام وميزانية جادة";
+    labelAr =
+      hireRate !== undefined && hireRate >= 70
+        ? "عميل موثوق - بيوظف بانتظام"
+        : "عميل بسجل كويس على المنصة";
   } else if (finalScore >= 5.5) {
     badge = "good";
-    labelAr = "عميل متوسط - فرصة مقبولة مع تدقيق الشروط";
+    labelAr = hasHistory
+      ? "عميل متوسط - فرصة مقبولة مع تدقيق الشروط"
+      : "مفيش سجل كافي عن العميل - احكم من وصف المشروع";
   } else {
     badge = "high_risk";
     labelAr = "عميل عالي المخاطر - احذر من ضياع العروض";
@@ -803,40 +782,17 @@ function extractSpentFromText(text: string): string | undefined {
 
 function inferPaymentVerified(
   text: string,
-  platform: string,
-  hireRate?: number
+  _platform: string,
+  _hireRate?: number
 ): boolean {
-  const p = platform.toLowerCase();
-  if (
-    p.includes("baeed") ||
-    p.includes("remoteok") ||
-    p.includes("wwr") ||
-    p.includes("khamsat")
-  ) {
-    return true;
-  }
-  if (
+  // Only an explicit statement counts. Platform type, a past hire, or generic words like
+  // "موثق" in the project text are not evidence that this client is verified.
+  if (text.includes("payment unverified") || text.includes("وسيلة الدفع غير موثقة")) return false;
+  return (
     text.includes("payment verified") ||
-    text.includes("تم التحقق من وسيلة الدفع") ||
-    text.includes("هوية موثقة") ||
-    text.includes("بريد مؤكد") ||
-    text.includes("جوال مؤكد") ||
     text.includes("payment method verified") ||
-    text.includes("fa-badge-check") ||
-    text.includes("fa-user-check") ||
-    text.includes("fa-check-circle") ||
-    text.includes("موثق")
-  ) {
-    return true;
-  }
-  if (text.includes("payment unverified") || text.includes("وسيلة الدفع غير موثقة")) {
-    return false;
-  }
-  // On Mostaql, if client has a proven hire rate > 0%, they have verified payment credentials
-  if ((p.includes("mostaql") || p.includes("nafezly")) && hireRate && hireRate > 0) {
-    return true;
-  }
-  return false;
+    text.includes("تم التحقق من وسيلة الدفع")
+  );
 }
 
 function formatSpentString(val: string | number): string {

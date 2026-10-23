@@ -210,11 +210,8 @@ export async function fetchMostaqlProjectDetails(
         : null;
 
     const hireRateNum = hirePercent ? Math.min(100, parseFloat(hirePercent[1])) : null;
-    const isPaymentVerified =
-      html.includes('هوية موثقة') ||
-      html.includes('بريد مؤكد') ||
-      html.includes('جوال مؤكد') ||
-      Boolean(hireRateNum && hireRateNum > 0);
+    // The client card's identity badge; a past hire is not proof of verification
+    const isPaymentVerified = html.includes('هوية موثقة');
 
     const description = descMatch ? stripHtml(descMatch[1]) : undefined;
     const minBudget = budgetNumbers.length ? Math.min(...budgetNumbers) : null;
