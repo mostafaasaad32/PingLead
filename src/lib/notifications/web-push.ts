@@ -87,10 +87,18 @@ export function projectPushPayload(p: {
   budget?: string | null;
   aiScore?: number | null;
   id: string;
+  /** From detectScam(): flagged posts get a warning icon and reason */
+  scam?: { level: 'none' | 'caution' | 'high'; reasons: string[] } | null;
 }): PushPayload {
-  const parts = [p.platformLabel, p.budget || null, typeof p.aiScore === 'number' ? `🤖 ${p.aiScore}% توافق` : null].filter(Boolean);
+  const parts = [
+    p.scam && p.scam.level !== 'none' ? `${p.scam.level === 'high' ? '🚩 احذر' : '⚠️ خلي بالك'}: ${p.scam.reasons[0]}` : null,
+    p.platformLabel,
+    p.budget || null,
+    typeof p.aiScore === 'number' ? `🤖 ${p.aiScore}% توافق` : null,
+  ].filter(Boolean);
+  const icon = p.scam?.level === 'high' ? '🚩' : '🎯';
   return {
-    title: `🎯 ${p.title}`.slice(0, 120),
+    title: `${icon} ${p.title}`.slice(0, 120),
     body: parts.join(' · '),
     url: p.url,
     tag: `project-${p.id}`,

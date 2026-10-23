@@ -19,6 +19,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { ingestCategoryPosts } from '@/lib/scrapers';
 import { PLATFORMS_METADATA, UnifiedProject, UserFilter } from '@/lib/scrapers/types';
 import { getPushSubscriptions, projectPushPayload, sendPushToSubscriptions } from '@/lib/notifications/web-push';
+import { detectScam } from '@/lib/filters/scam-detector';
 import { batchMatchProjects } from '@/lib/matching/filter-matcher';
 import { sendSmartFilterTelegramAlert, dispatchLeadToSubscribers } from '@/lib/telegram/dispatcher';
 import { evaluateProjectForAutoBidding } from '@/lib/auto-bidder/engine';
@@ -417,6 +418,7 @@ export async function GET(req: NextRequest) {
                 platformLabel: PLATFORMS_METADATA.find((p) => p.id === item.project.platform)?.label_ar || item.project.platform,
                 budget: item.project.budget,
                 aiScore: aiByAction.get(action.id)?.result?.score ?? null,
+                scam: detectScam(item.project.title, item.project.description),
               })
             )
         );

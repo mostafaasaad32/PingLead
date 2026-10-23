@@ -8,6 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 import { isJobBoard, type ProjectInsights } from '@/lib/scrapers/types';
+import { detectScam } from '@/lib/filters/scam-detector';
 import type { ProjectPricing } from '@/lib/insights/pricing';
 import { getCompetitionVerdict, getClientVerdict } from '@/lib/insights/competition';
 
@@ -157,6 +158,15 @@ export async function sendSmartFilterTelegramAlert(
   // Freshness right under the title: how fast the alert arrived is the point of the product
   const freshness = formatPostedAgo(project.source_created_at);
 
+  // Scam / risk signs in the post itself (rule-based, instant)
+  const scam = detectScam(project.title, project.description);
+  const scamLine =
+    scam.level === 'high'
+      ? `🚩 <b>احذر:</b> ${escapeHtml(scam.reasons.join(' · '))}\n`
+      : scam.level === 'caution'
+        ? `⚠️ <b>خلي بالك:</b> ${escapeHtml(scam.reasons.join(' · '))}\n`
+        : '';
+
   const aiLine =
     typeof project.ai_score === 'number'
       ? `🤖 <b>توافق مع شروطك:</b> ${project.ai_score >= 85 ? '🟢' : project.ai_score >= 70 ? '🟡' : '🔴'} ${project.ai_score}%` +
@@ -169,6 +179,7 @@ export async function sendSmartFilterTelegramAlert(
     `🎯 <b>تنبيه فلتر ذكي: ${escapeHtml(filterName)}</b>\n\n` +
     `💼 <b>${cleanTitle}</b>\n` +
     (freshness ? `⏱️ <b>${freshness}</b>\n` : '') +
+    scamLine +
     aiLine +
     `📍 <b>المنصة:</b> ${platformLabel}\n` +
     `💰 <b>${isJob ? 'الراتب (وظيفة)' : 'الميزانية'}:</b> ${escapeHtml(budgetInfo)}` +

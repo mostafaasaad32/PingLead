@@ -37,6 +37,7 @@ import {
   extractTitleFromPostText,
   extractDetailsFromPostText,
 } from "@/lib/scrapers/types";
+import { detectScam } from "@/lib/filters/scam-detector";
 import {
   calculateClientScore,
   ClientEvaluation,
@@ -150,6 +151,24 @@ const FUNNEL_STATUSES: { id: FunnelStatus; label: string; toast: string }[] = [
   { id: "replied", label: "💬 العميل رد", toast: "💬 اتسجل إن العميل رد" },
   { id: "won", label: "🏆 كسبته", toast: "🏆 مبروك! اتسجل إنك كسبت المشروع" },
 ];
+
+/** Scam / risk signs found in the post text (rule-based, no AI) */
+function ScamWarning({ postText }: { postText: string }) {
+  const check = detectScam(extractTitleFromPostText(postText), extractDetailsFromPostText(postText));
+  if (check.level === "none") return null;
+  const high = check.level === "high";
+  return (
+    <div
+      role="note"
+      className={`mb-3 flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] ${
+        high ? "bg-rose-50 text-rose-800 border-rose-200" : "bg-amber-50 text-amber-800 border-amber-200"
+      }`}
+    >
+      <span className="font-bold whitespace-nowrap">{high ? "🚩 احذر:" : "⚠️ خلي بالك:"}</span>
+      <span>{check.reasons.join(" · ")}</span>
+    </div>
+  );
+}
 
 /** AI qualifier badge: score against the user's criteria, reason on hover and on small screens */
 function AiScoreBadge({ action }: { action?: TrackedProjectAction }) {
@@ -1404,6 +1423,8 @@ export default function DashboardPage() {
                         </h2>
 
                         <InsightChips insights={lead.insights} pricing={lead.pricing} />
+
+                        <ScamWarning postText={lead.post_text} />
 
                         <AiScoreBadge action={action} />
 
