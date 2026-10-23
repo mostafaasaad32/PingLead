@@ -1,17 +1,20 @@
 // ==============================================================================
 // src/app/api/cron/digest/route.ts
-// Email digest of new matches. Call it every hour (cron-job.org, same Bearer
-// CRON_SECRET as /api/cron/ingest):
-//   - 'hourly' users: matches since their last digest, at most once an hour
-//   - 'daily' users: at 9:00 in their timezone, matches since the last digest
-// Matches below the filter's AI threshold and ignored projects are left out.
-// A user is only emailed when there is at least one match.
+// Scheduled summaries. Call it every hour (cron-job.org, same Bearer CRON_SECRET as
+// /api/cron/ingest):
+// 1. Telegram daily summary at 9:00 in each linked user's timezone (on by default)
+// 2. Email digest (needs RESEND_API_KEY + EMAIL_FROM):
+//    - 'hourly' users: matches since their last digest, at most once an hour
+//    - 'daily' users: at 9:00 in their timezone, matches since the last digest
+//    Matches below the filter's AI threshold and ignored projects are left out.
+//    A user is only emailed when there is at least one match.
 // ==============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { PLATFORMS_METADATA } from "@/lib/scrapers/types";
 import { digestEmailHtml, isEmailConfigured, sendEmail } from "@/lib/notifications/email";
+import { sendDailySummary } from "@/lib/notifications/daily-summary";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -34,18 +37,47 @@ export async function GET(req: NextRequest) {
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!isEmailConfigured()) {
-    return NextResponse.json({ ok: true, skipped: "RESEND_API_KEY / EMAIL_FROM not set" });
-  }
-
   const now = Date.now();
+  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.APP_URL || "https://ping-lead.vercel.app").replace(/\/$/, "");
+
+  const telegram = await runTelegramSummaries(now, siteUrl);
+  const email = isEmailConfigured()
+    ? await runEmailDigests(now, siteUrl)
+    : { skipped: "RESEND_API_KEY / EMAIL_FROM not set" };
+
+  return NextResponse.json({ ok: true, telegram, email });
+}
+
+async function runTelegramSummaries(now: number, siteUrl: string) {
+  const { data: profiles, error } = await (supabaseAdmin.from("freelancer_profiles") as any)
+    .select("user_id, full_name, timezone, telegram_chat_id, ai_credits, telegram_summary_sent_at")
+    .eq("telegram_summary", true)
+    .not("telegram_chat_id", "is", null)
+    .limit(MAX_USERS_PER_RUN);
+  if (error) return { error: error.message }; // migration 0019 not applied yet
+
+  let due = 0;
+  let sent = 0;
+  for (const p of profiles || []) {
+    const lastSent = p.telegram_summary_sent_at ? new Date(p.telegram_summary_sent_at).getTime() : 0;
+    if (localHour(p.timezone || "Africa/Cairo") !== DAILY_HOUR || now - lastSent < 20 * 60 * 60 * 1000) continue;
+    due++;
+    // Mark first: a slow or failed send never turns into two summaries on the same morning
+    await (supabaseAdmin.from("freelancer_profiles") as any)
+      .update({ telegram_summary_sent_at: new Date(now).toISOString() })
+      .eq("user_id", p.user_id);
+    if (await sendDailySummary(p, siteUrl).catch(() => false)) sent++;
+  }
+  return { linked: profiles?.length || 0, due, sent };
+}
+
+async function runEmailDigests(now: number, siteUrl: string) {
   const { data: profiles, error } = await (supabaseAdmin.from("freelancer_profiles") as any)
     .select("user_id, full_name, timezone, email_digest, email_digest_sent_at")
     .in("email_digest", ["hourly", "daily"])
     .limit(MAX_USERS_PER_RUN);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return { error: error.message };
 
-  const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.APP_URL || "https://ping-lead.vercel.app").replace(/\/$/, "");
   let sent = 0;
   let due = 0;
 
@@ -105,5 +137,5 @@ export async function GET(req: NextRequest) {
       .eq("user_id", p.user_id);
   }
 
-  return NextResponse.json({ ok: true, subscribers: profiles?.length || 0, due, sent });
+  return { subscribers: profiles?.length || 0, due, sent };
 }

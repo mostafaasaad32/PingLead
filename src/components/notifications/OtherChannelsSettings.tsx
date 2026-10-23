@@ -1,10 +1,10 @@
 "use client";
 
-// Browser notifications (Web Push) + email digest, for users who don't use Telegram.
+// Daily Telegram summary + browser notifications (Web Push) + email digest.
 // Used on /settings/notifications.
 
 import { useCallback, useEffect, useState } from "react";
-import { BellRing, Mail, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { BellRing, Mail, Loader2, CheckCircle2, AlertCircle, Sun } from "lucide-react";
 
 type Digest = "off" | "hourly" | "daily";
 
@@ -36,6 +36,11 @@ export default function OtherChannelsSettings({ onToast }: { onToast: (msg: stri
   const [email, setEmail] = useState<string | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
 
+  // Daily Telegram summary
+  const [summaryEnabled, setSummaryEnabled] = useState(true);
+  const [summaryAvailable, setSummaryAvailable] = useState(false);
+  const [telegramLinked, setTelegramLinked] = useState(false);
+
   const refreshPush = useCallback(async () => {
     const supported =
       typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
@@ -57,6 +62,15 @@ export default function OtherChannelsSettings({ onToast }: { onToast: (msg: stri
 
   useEffect(() => {
     refreshPush();
+    fetch("/api/notifications/summary")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data?.ok) return;
+        setSummaryAvailable(!data.migrationMissing);
+        setSummaryEnabled(Boolean(data.enabled));
+        setTelegramLinked(Boolean(data.telegramLinked));
+      })
+      .catch(() => {});
     fetch("/api/notifications/email")
       .then((r) => r.json())
       .then((data) => {
@@ -130,6 +144,22 @@ export default function OtherChannelsSettings({ onToast }: { onToast: (msg: stri
     }
   };
 
+  const toggleSummary = async (next: boolean) => {
+    setSummaryEnabled(next);
+    const res = await fetch("/api/notifications/summary", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (!data.ok) {
+      setSummaryEnabled(!next);
+      onToast(data.error || "تعذر الحفظ");
+      return;
+    }
+    onToast(next ? "☀️ هيوصلك ملخص كل يوم الساعة 9 الصبح" : "الملخص اليومي اتقفل");
+  };
+
   const saveDigest = async (next: Digest) => {
     const previous = digest;
     setDigest(next);
@@ -153,6 +183,32 @@ export default function OtherChannelsSettings({ onToast }: { onToast: (msg: stri
 
   return (
     <>
+      {/* Daily Telegram summary */}
+      {summaryAvailable && telegramLinked && (
+        <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl flex items-center justify-between gap-4">
+          <div>
+            <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
+              <Sun className="w-4 h-4 text-emerald-600" />
+              <span>ملخص يومي على تليجرام</span>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+              كل يوم الساعة 9 الصبح: وصلك كام مشروع، قدّمت على كام، وأحسن المشاريع اللي لسه ملحقتش تقدّم عليها.
+            </p>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer shrink-0">
+            <input
+              id="telegram-daily-summary"
+              type="checkbox"
+              checked={summaryEnabled}
+              onChange={(e) => toggleSummary(e.target.checked)}
+              className="sr-only peer"
+              aria-label="ملخص يومي على تليجرام"
+            />
+            <div className="w-11 h-6 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+          </label>
+        </div>
+      )}
+
       {/* Browser notifications */}
       <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl space-y-3">
         <div className="flex items-start justify-between gap-4">
