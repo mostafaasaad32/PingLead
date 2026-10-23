@@ -77,6 +77,33 @@ export async function scrapeFreelancerCategory(
         .trim();
       const cat = classifyProjectCategory(`${p.title} ${description}`, jobHint || categorySlug);
 
+      const COUNTRY_BY_CODE: Record<string, string> = {
+        US: 'الولايات المتحدة (USD)',
+        IN: 'الهند (INR)',
+        GB: 'بريطانيا (GBP)',
+        UK: 'بريطانيا (GBP)',
+        EU: 'الاتحاد الأوروبي (EUR)',
+        CA: 'كندا (CAD)',
+        AU: 'أستراليا (AUD)',
+        AE: 'الإمارات (AED)',
+        SA: 'السعودية (SAR)',
+        EG: 'مصر (EGP)',
+        SG: 'سنغافورة (SGD)',
+        NZ: 'نيوزيلندا (NZD)',
+        DE: 'ألمانيا (EUR)',
+      };
+
+      const detectedCountry =
+        p.location?.country?.name ||
+        (p.currency?.country && COUNTRY_BY_CODE[p.currency.country]) ||
+        (p.currency?.name ? `دولي (${p.currency.name})` : null);
+
+      const authorName = p.upgrades?.featured
+        ? 'عميل مميز (Featured)'
+        : p.upgrades?.urgent
+          ? 'عميل عاجل (Urgent)'
+          : 'عميل دولي (Freelancer)';
+
       results.push(
         createUnifiedProject({
           external_id: String(p.id),
@@ -91,7 +118,7 @@ export async function scrapeFreelancerCategory(
           language: 'en',
           category: cat,
           published_at: p.submitdate ? new Date(p.submitdate * 1000).toISOString() : new Date().toISOString(),
-          author: 'Freelancer Client',
+          author: authorName,
           insights: {
             job_type: p.type === 'hourly' ? 'hourly' : p.type === 'fixed' ? 'fixed' : null,
             bids_count: typeof p.bid_stats?.bid_count === 'number' ? p.bid_stats.bid_count : null,
@@ -99,6 +126,17 @@ export async function scrapeFreelancerCategory(
             bids_avg: typeof p.bid_stats?.bid_avg === 'number'
               ? estimateBudgetUsd(Math.round(p.bid_stats.bid_avg), currency)
               : null,
+            client_country: detectedCountry,
+            payment_verified: Boolean(
+              p.is_escrow_project ||
+              p.active_prepaid_milestone ||
+              p.upgrades?.active_prepaid_milestone ||
+              p.upgrades?.featured ||
+              p.upgrades?.urgent ||
+              p.upgrades?.recruiter ||
+              p.upgrades?.NDA ||
+              p.upgrades?.sealed
+            ),
           },
         })
       );

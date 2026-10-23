@@ -184,7 +184,7 @@ export async function POST(req: NextRequest) {
       category: string;
     }> = [];
 
-    // A. Extracted Employment History (e.g. YallaPro, Software Engineering roles)
+    // A. Extracted Employment History
     const rewrites = auditResult.sections.experience?.employmentRewrites || [];
     for (const exp of rewrites) {
       const role = exp.recommendedTitle || exp.currentRole || "";
@@ -211,7 +211,7 @@ export async function POST(req: NextRequest) {
       existingTitles.add(itemTitle.trim().toLowerCase());
     }
 
-    // B. Active Contracts (e.g. LBLX116)
+    // B. Active Contracts
     const activeContracts = auditResult.stats?.activeContracts || [];
     for (const contract of activeContracts) {
       if (!contract || typeof contract !== "string") continue;

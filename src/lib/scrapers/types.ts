@@ -8,6 +8,9 @@
 //   4. UnifiedProject, UserFilter, Proposal & Freelancer Profile Types
 // ==============================================================================
 
+import { ClientEvaluation, calculateClientScore } from '../scoring/client-scorer';
+export type { ClientEvaluation };
+
 // 1. The 20 Multi-Platform Freelance Marketplaces
 export type ArabPlatform =
   | 'mostaql'
@@ -352,6 +355,9 @@ export interface ProjectInsights {
   details_fetched_at?: string | null;
   /** Fixed-price or hourly. Used for matching only (not stored). */
   job_type?: 'fixed' | 'hourly' | null;
+  payment_verified?: boolean | null;
+  client_rating?: number | null;
+  client_evaluation?: ClientEvaluation | null;
 }
 
 export const PROJECT_INSIGHT_KEYS: (keyof ProjectInsights)[] = [
@@ -568,6 +574,20 @@ export function createUnifiedProject(params: {
     intent_score: 10,
     is_buyer: true,
     ...(params.insights || {}),
+    client_evaluation:
+      params.insights?.client_evaluation ??
+      calculateClientScore({
+        platform: params.platform,
+        title: params.title,
+        description: params.description,
+        budget,
+        budget_min: params.budget_min,
+        budget_max: params.budget_max,
+        budget_usd_estimate,
+        currency,
+        author,
+        insights: params.insights,
+      }),
   };
 }
 

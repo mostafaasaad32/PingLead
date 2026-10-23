@@ -8,6 +8,7 @@
 import { UnifiedProject, createUnifiedProject, ProjectCategory, ProjectInsights } from './types';
 import { parseArabicRelativeDate } from './utils';
 import { classifyProjectCategory } from '../filters/categorizer';
+import { calculateClientScore } from '../scoring/client-scorer';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
 
@@ -94,9 +95,14 @@ export async function scrapeMostaqlCategory(
       const nextCardAt = rawContext.indexOf('class="project-row"', 1);
       const cardContext = nextCardAt > 0 ? rawContext.slice(0, nextCardAt) : rawContext;
 
-      // Bids so far: <span class="hsoub-file-signature-icon"></span> 3 عروض
-      const bidsMatch = cardContext.match(/hsoub-file-signature-icon"><\/span>\s*(\d+)/i);
-      const bidsCount = bidsMatch ? parseInt(bidsMatch[1], 10) : null;
+      // Bids so far: <span class="hsoub-file-signature-icon"></span> 3 عروض / أضف أول عرض
+      let bidsCount: number | null = null;
+      if (cardContext.includes('أضف أول عرض')) {
+        bidsCount = 0;
+      } else {
+        const bidsMatch = cardContext.match(/hsoub-file-signature-icon"><\/span>\s*(\d+)/i);
+        bidsCount = bidsMatch ? parseInt(bidsMatch[1], 10) : null;
+      }
 
       // Brief
       const briefMatch = cardContext.match(/<p class="text-wrapper-div project__brief\s*"[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>\s*<\/p>/i);
@@ -203,16 +209,41 @@ export async function fetchMostaqlProjectDetails(
         ? html.slice(breadcrumbAt, breadcrumbAt + 2000).match(/href="https:\/\/mostaql\.com\/projects\/([a-z-]+)"/i)
         : null;
 
-    return {
-      platform_category: categoryMatch ? categoryMatch[1] : null,
-      budget_min: budgetNumbers.length ? Math.min(...budgetNumbers) : null,
-      budget_max: budgetNumbers.length ? Math.max(...budgetNumbers) : null,
-      description: descMatch ? stripHtml(descMatch[1]) : undefined,
-      duration_text: durationMatch ? stripHtml(durationMatch[1]).replace(/\s+/g, ' ') : null,
-      client_hire_rate: hirePercent ? Math.min(100, parseFloat(hirePercent[1])) : null,
+    const hireRateNum = hirePercent ? Math.min(100, parseFloat(hirePercent[1])) : null;
+    const isPaymentVerified =
+      html.includes('هوية موثقة') ||
+      html.includes('بريد مؤكد') ||
+      html.includes('جوال مؤكد') ||
+      Boolean(hireRateNum && hireRateNum > 0);
+
+    const description = descMatch ? stripHtml(descMatch[1]) : undefined;
+    const minBudget = budgetNumbers.length ? Math.min(...budgetNumbers) : null;
+    const maxBudget = budgetNumbers.length ? Math.max(...budgetNumbers) : null;
+
+    const clientEvaluation = calculateClientScore({
+      platform: 'mostaql',
+      client_hire_rate: hireRateNum,
       client_open_projects: openMatch ? parseInt(openMatch[1], 10) : null,
       client_in_progress: progressMatch ? parseInt(progressMatch[1], 10) : null,
       client_registered_at: registeredMatch ? registeredMatch[1].trim() : null,
+      payment_verified: isPaymentVerified,
+      description,
+      budget_min: minBudget,
+      budget_max: maxBudget,
+    });
+
+    return {
+      platform_category: categoryMatch ? categoryMatch[1] : null,
+      budget_min: minBudget,
+      budget_max: maxBudget,
+      description,
+      duration_text: durationMatch ? stripHtml(durationMatch[1]).replace(/\s+/g, ' ') : null,
+      client_hire_rate: hireRateNum,
+      client_open_projects: openMatch ? parseInt(openMatch[1], 10) : null,
+      client_in_progress: progressMatch ? parseInt(progressMatch[1], 10) : null,
+      client_registered_at: registeredMatch ? registeredMatch[1].trim() : null,
+      payment_verified: isPaymentVerified,
+      client_evaluation: clientEvaluation,
       details_fetched_at: new Date().toISOString(),
     };
   } catch (err: any) {

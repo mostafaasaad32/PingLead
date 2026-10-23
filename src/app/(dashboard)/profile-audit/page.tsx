@@ -862,17 +862,17 @@ export default function ProfileAuditPage() {
                   <>
                     <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700">
                       <Briefcase className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{stats?.totalJobs ?? 1} Total jobs</span>
+                      <span>{stats?.totalJobs ? `${stats.totalJobs} Total jobs` : "غير متاح"}</span>
                     </div>
 
                     <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700">
                       <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{stats?.totalHours ?? 0} Total hours</span>
+                      <span>{stats?.totalHours ? `${stats.totalHours} Total hours` : "غير متاح"}</span>
                     </div>
 
                     <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700">
                       <DollarSign className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{stats?.hourlyRate ?? "$15.00/hr"}</span>
+                      <span>{stats?.hourlyRate || "غير متاح"}</span>
                     </div>
 
                     {stats?.activeContracts && stats.activeContracts.length > 0 && (

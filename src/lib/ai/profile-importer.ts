@@ -593,19 +593,19 @@ export function extractUpworkDeepStats(text: string): {
     text.match(/(\d+)\s*Total jobs/i) ||
     text.match(/worked\s*(\d+)\s*fixed-price job/i);
   if (jobsMatch) stats.totalJobs = jobsMatch[1];
-  else stats.totalJobs = "1";
+  else stats.totalJobs = "";
 
   // Total hours
   const hoursMatch =
     text.match(/####\s*([0-9—]+)\s*\n[^\n]*Total hours/i) ||
     text.match(/([0-9]+)\s*Total hours/i);
   if (hoursMatch) stats.totalHours = hoursMatch[1] === "—" ? "0" : hoursMatch[1];
-  else stats.totalHours = "0";
+  else stats.totalHours = "";
 
   // Hourly rate
   const rateMatch = text.match(/\$([0-9.]+)\s*\/\s*(?:hr|hour)/i);
   if (rateMatch) stats.hourlyRate = `$${rateMatch[1]}/hr`;
-  else stats.hourlyRate = "$15.00/hr";
+  else stats.hourlyRate = "";
 
   // Active contracts / LBLX
   const activeContracts: string[] = [];
@@ -621,9 +621,6 @@ export function extractUpworkDeepStats(text: string): {
       const clean = m.replace(/In progress|Active contract/gi, "").trim();
       if (clean && !activeContracts.includes(clean)) activeContracts.push(clean);
     });
-  }
-  if (activeContracts.length === 0) {
-    activeContracts.push("LBLX116...");
   }
   stats.activeContracts = activeContracts;
 
@@ -650,31 +647,69 @@ export function extractUpworkDeepStats(text: string): {
 
   // Employment
   const employmentHistory: Array<{ title: string; company: string; description?: string }> = [];
-  employmentHistory.push({
-    title: "Software-Engineer",
-    company: "YallaPro",
-    description: "Software engineering, backend data workflows, and automation scripts.",
-  });
+  const empMatch = text.match(/(?:####\s*)?(?:Employment history|Work history)\s*\n([\s\S]*?)(?:####|###|Education|Certifications|$)/i);
+  if (empMatch) {
+    const rawBlocks = empMatch[1].split(/\n\s*\n/);
+    for (const block of rawBlocks) {
+      const lines = block
+        .split("\n")
+        .map((l) => l.replace(/^[-*•#\s]+/, "").trim())
+        .filter(Boolean);
+      if (lines.length >= 2) {
+        employmentHistory.push({
+          title: lines[0],
+          company: lines[1],
+          description: lines.slice(2).join(" "),
+        });
+      } else if (lines.length === 1 && lines[0].includes("|")) {
+        const [title, company] = lines[0].split("|").map((s) => s.trim());
+        employmentHistory.push({ title, company: company || "" });
+      }
+    }
+  }
   stats.employmentHistory = employmentHistory;
 
   // Education
   const education: Array<{ degree: string; institution: string }> = [];
-  education.push({
-    degree: "Computer Engineering",
-    institution: "Ain Shams University",
-  });
+  const eduMatch = text.match(/(?:####\s*)?Education\s*\n([\s\S]*?)(?:####|###|Certifications|Employment|$)/i);
+  if (eduMatch) {
+    const rawBlocks = eduMatch[1].split(/\n\s*\n/);
+    for (const block of rawBlocks) {
+      const lines = block
+        .split("\n")
+        .map((l) => l.replace(/^[-*•#\s]+/, "").trim())
+        .filter(Boolean);
+      if (lines.length >= 2) {
+        education.push({
+          degree: lines[1],
+          institution: lines[0],
+        });
+      } else if (lines.length === 1 && (lines[0].includes(" at ") || lines[0].includes(" - "))) {
+        const parts = lines[0].split(/\s+(?:at|-)\s+/);
+        education.push({ degree: parts[0], institution: parts[1] || "" });
+      }
+    }
+  }
   stats.education = education;
 
   // Certifications
   const certifications: Array<{ title: string; provider?: string }> = [];
-  certifications.push({
-    title: "The AI Diploma",
-    provider: "INSTANT",
-  });
-  certifications.push({
-    title: "Advanced Deep Learning Program",
-    provider: "APPLAI",
-  });
+  const certMatch = text.match(/(?:####\s*)?Certifications?\s*\n([\s\S]*?)(?:####|###|Education|Employment|$)/i);
+  if (certMatch) {
+    const lines = certMatch[1]
+      .split("\n")
+      .map((l) => l.replace(/^[-*•#\s]+/, "").trim())
+      .filter(Boolean);
+    for (const line of lines) {
+      if (line.length > 2 && line.length < 80) {
+        const parts = line.split(/\s*\(|\)\s*/).filter(Boolean);
+        certifications.push({
+          title: parts[0],
+          provider: parts[1] || undefined,
+        });
+      }
+    }
+  }
   stats.certifications = certifications;
 
   return stats;
@@ -743,14 +778,14 @@ export function calculateVollnaDeterministicScore(data: {
 
   // 5. Title Clarity & Niche Focus (15 pts)
   let titleScore = 14;
-  const title = (data.headline || "").toLowerCase();
-  if (
-    (title.includes("data engineer") || title.includes("data analyst")) &&
-    (title.includes("nlp") || title.includes("deep learning") || title.includes("ai engineer") || title.includes("specialist"))
-  ) {
-    titleScore = 9; // splitting intent across disparate niches
-  } else if (title.includes("|") || title.includes("&")) {
-    titleScore = 11;
+  const rawTitle = (data.headline || "").trim();
+  const separators = (rawTitle.match(/[|&/,-]/g) || []).length;
+  if (!rawTitle) {
+    titleScore = 5;
+  } else if (separators >= 3 || rawTitle.length > 70) {
+    titleScore = 9; // splitting intent across multiple disparate niches
+  } else if (separators >= 1) {
+    titleScore = 12;
   }
 
   // 6. Image & Video Introduction (15 pts)
@@ -1590,65 +1625,64 @@ export async function auditUpworkProfileWithAi(params: {
 }): Promise<VollnaProfileAuditResult> {
   const auditSystemInstruction = `
 You are an elite, world-class Freelance Profile Strategist and Talent Consultant (Vollna & Upwork Top Rated Plus Talent Auditor).
-Your evaluation MUST strictly follow the uncompromising standards and exact JSON format of Vollna Profile Reviews.
-DO NOT flatter or give complimentary high scores! Be ruthlessly objective, realistic, and specific.
+Your evaluation MUST strictly follow the objective standards and exact JSON format of Vollna Profile Reviews.
+DO NOT flatter or give gratuitously high scores! Be objectively realistic, analytical, and tailored strictly to the candidate's actual profile details.
 
 CRITICAL EVALUATION RULES:
-1. OVERALL SCORE STRICTNESS (Deterministic Weights from 100 points):
-   - Vollna never gives high scores (e.g. 80%+) to incomplete profiles!
-   - A profile with 0 Portfolio case studies, 0 Project Catalogs, only 8 of 20 skill slots used, a single employment entry, and an overview starting with "As a dedicated..." MUST receive a realistic score of approximately 48% - 52% (matching Vollna).
+1. OVERALL SCORE OBJECTIVITY (Deterministic Weights from 100 points):
+   - Vollna never gives high scores (e.g. 80%+) to incomplete profiles. Profiles missing portfolios, catalogs, or key sections receive lower, realistic scores based on completeness.
    - Strict criteria:
-     * Market Proof & Completeness (20 pts): Deduct 15 pts if Portfolio is empty (0 items). Deduct 5 pts if Catalog is empty (0 packages).
-     * Skills Utilization (15 pts): Upwork allows 20 skills. Using < 10 skills gets only 6/15 pts.
-     * Employment & Experience Depth (15 pts): Only 1 employment entry gets only 7/15 pts.
-     * Overview Structure & Client-Centricity (20 pts): Opening with "As a dedicated..." or "I am..." (freelancer-focused rather than client-hook) deducts 10 pts.
-     * Title Clarity & Niche Focus (15 pts): Splitting intent between Data Engineering and NLP/Deep Learning gets only 9/15 pts.
-     * Image & Video (15 pts): Missing video introduction deducts 5 pts. Professional photo gets 10 pts.
+     * Market Proof & Completeness (20 pts): Deduct points if Portfolio is empty (0 items) or Project Catalog is missing (0 packages).
+     * Skills Utilization (15 pts): Upwork allows 20 skills. Using fewer relevant skills yields proportionally lower points.
+     * Employment & Experience Depth (15 pts): Evaluate depth and relevance of employment history. Single or missing entries receive lower scores.
+     * Overview Structure & Client-Centricity (20 pts): Opening with freelancer-focused statements (e.g., "I am...", "As a dedicated...") instead of client-hook outcomes deducts points.
+     * Title Clarity & Niche Focus (15 pts): Splitting intent across unrelated niches or vague titles deducts points; clear high-intent niche titles score higher.
+     * Image & Video (15 pts): Missing video introduction deducts points. Professional photo scores higher.
 
 2. EXECUTIVE SUMMARY:
-   - Provide a precise diagnostic paragraph explicitly mentioning the exact extracted metrics:
-     "This is an early-stage profile with 1 completed job, 1 active in-progress contract, 0 tracked hours, and an initial rate of $15.00/hr. The most critical gaps holding back your search impressions and conversion are: 0 Portfolio case studies, 0 Project Catalog packages, utilizing only 8 of 20 available skill slots, having a single brief employment entry ('Software Engineer at YallaPro') lacking keyword density, and opening your overview with a freelancer-centric statement ('As a dedicated...')."
+   - Provide a precise diagnostic paragraph explicitly referencing the candidate's actual extracted metrics (total jobs, hours, rate, active contracts).
+   - Identify the most critical gaps holding back search impressions and conversion based strictly on their actual profile data (e.g., empty portfolio, unutilized skill slots, brief employment entries, or overview phrasing).
 
 3. SUGGESTED OVERVIEW STRUCTURE:
-   - Hook: First line earns the scroll. Focus on client business outcomes, e.g. turning raw text into production NLP models and automated pipelines.
-   - Unique value: What only you bring (e.g. bridging fine-tuned Transformers with production-grade data pipelines).
-   - How you help: 4 distinct bullets detailing tangible deliverables.
-   - Proof: 2-3 bullets featuring concrete credentials (e.g., 🎓 Ain Shams University, 📜 The AI Diploma (INSTANT) / APPLAI training, 💼 Software Engineer at YallaPro).
+   - Hook: First line earns the scroll. Focus on client business outcomes tailored to the candidate's specific niche and skills.
+   - Unique value: What only they bring based on their actual background.
+   - How you help: 4 distinct bullets detailing tangible deliverables relevant to their domain.
+   - Proof: 2-3 bullets featuring concrete credentials (the candidate's actual degrees, certifications, or past professional experience).
    - Call to action: Direct, low-friction next step.
 
 4. SKILLS SECTION:
-   - usedSlots: exact number of current skills (e.g. 8)
+   - usedSlots: exact number of current skills extracted from the candidate.
    - maxSlots: 20
    - currentSkills: list of existing skills in their exact order of appearance.
-   - analysis: Detailed explanation of why 8/20 is under-optimized and why database skills dominate rather than primary NLP keywords.
-   - skillsToAdd: 10 to 12 high-intent skills to fill the remaining slots (e.g. Machine Learning Model, Data Science, Data Analysis, ETL Pipeline, Transformers, Hugging Face, Generative AI, Data Mining, TensorFlow, Text Classification, AI Model Training).
-   - skillsToReorder: Array of 4 reorder recommendations with fromRank and toRank (e.g. Machine Learning #5 -> #1, NLP #3 -> #2, Deep Learning #4 -> #3, Python #1 -> #4).
+   - analysis: Detailed explanation of their current skill selection, whether they effectively utilize the 20 available slots, and how aligned they are with their stated title.
+   - skillsToAdd: High-intent, in-demand skills tailored to their specific niche to fill remaining slots up to 20.
+   - skillsToReorder: Array of recommended reorders with fromRank and toRank to place primary search keywords at the top.
 
 5. PORTFOLIO SECTION:
-   - currentCount: actual count (e.g. 0).
-   - alertTitle: "No portfolio items yet" (if 0) or appropriate title.
-   - alertMessage: "Adding 2-3 strong case studies is the fastest way to increase conversion."
-   - projectIdeas: 2-3 detailed project ideas with "title", "description", and "whyItWorks".
+   - currentCount: actual count from profile.
+   - alertTitle: "No portfolio items yet" (if 0) or appropriate title matching their count.
+   - alertMessage: Diagnostic feedback on portfolio strength.
+   - projectIdeas: 2-3 detailed project ideas tailored to their niche with "title", "description", and "whyItWorks".
 
 6. EXPERIENCE SECTION:
-   - alertTitle: "Attention needed"
-   - alertMessage: "Only 1 employment entry. Add a second real entry (internship, freelance, or project-based role) with niche keywords."
-   - rolesToAdd: Array of recommended roles (e.g. "Machine Learning / NLP Engineer (Projects & Training)").
-   - employmentHistoryNote: Diagnostic note on current employment and active contracts.
-   - employmentRewrites: Detailed rewrite of current role(s) (e.g. Software-Engineer at YallaPro -> "Software Engineer | AI, NLP & Data Pipelines", whyItWorks explaining keyword relevance).
-   - suggestedAdditions: 3 additions (Certifications, Open Source, Courses).
+   - alertTitle: Diagnostic title (e.g., "Attention needed" if 0-1 entries, or "Solid experience foundation").
+   - alertMessage: Context-aware feedback on their experience depth.
+   - rolesToAdd: Array of recommended roles or experience categories relevant to their niche.
+   - employmentHistoryNote: Diagnostic note on their current employment entries and active contracts.
+   - employmentRewrites: Detailed rewrite of their actual role(s) with recommendedTitle, recommendedDescription, and whyItWorks highlighting keyword relevance and client outcomes.
+   - suggestedAdditions: Suggested credential or project additions tailored to their profession.
 
 7. VIDEO SECTION:
    - hasVideo: boolean (false if none).
-   - analysis: Analysis on why 30-60s intro video triples invitation rates.
-   - scriptSections: 3 timed sections: "Hook (0-10s)", "Value & Proof (10-35s)", "Call to Action (35-45s)".
+   - analysis: Objective analysis of video presence.
+   - scriptSections: 3 timed sections: "Hook (0-10s)", "Value & Proof (10-35s)", "Call to Action (35-45s)" tailored to their name and niche.
 
 8. CATALOG SECTION:
-   - currentCount: actual count (e.g. 0).
+   - currentCount: actual count.
    - infoBanner: "Catalogs surface your profile on Upwork's product listing page, a second entry point for views, messages, and invites."
-   - alertTitle: "No catalog projects yet"
-   - alertMessage: "Adding one or two is a quick win. Start with a project idea below."
-   - projectIdeas: 3 productized services starting with "You will get..." with description and rationale.
+   - alertTitle: Appropriate title matching count.
+   - alertMessage: Practical advice on project catalogs.
+   - projectIdeas: 2-3 productized service ideas starting with "You will get..." with description and rationale matching their specific specialty.
 
 Respond STRICTLY with this JSON schema:
 {
@@ -1765,34 +1799,34 @@ Respond STRICTLY with this JSON schema:
   } else if (params.profileData) {
     const p = params.profileData;
     const profileSummary = `
-Full Name: ${p.fullName}
-Headline: ${p.headline}
-Hourly Rate: ${p.hourlyRate || "$15.00/hr"}
-Total Jobs Completed: ${p.totalJobs || "1"}
-Total Tracked Hours: ${p.totalHours || "0"}
-Active / In-progress Contracts: ${p.activeContracts?.join(", ") || "LBLX116..."}
+Full Name: ${p.fullName || "غير متاح"}
+Headline: ${p.headline || "غير متاح"}
+Hourly Rate: ${p.hourlyRate || "غير متاح"}
+Total Jobs Completed: ${p.totalJobs ? p.totalJobs : "غير متاح"}
+Total Tracked Hours: ${p.totalHours !== undefined && p.totalHours !== "" ? p.totalHours : "غير متاح"}
+Active / In-progress Contracts: ${p.activeContracts?.length ? p.activeContracts.join(", ") : "غير متاح"}
 Avatar URL: ${p.avatarUrl || "None"}
-Skills (in exact order, count ${p.skills.length}/20):
-${p.skills.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+Skills (in exact order, count ${p.skills?.length || 0}/20):
+${p.skills?.length ? p.skills.map((s, i) => `${i + 1}. ${s}`).join("\n") : "غير متاح"}
 
 Employment History:
-${p.employmentHistory?.length ? p.employmentHistory.map(e => `- Role: ${e.title} at ${e.company}. ${e.description || ""}`).join("\n") : "- Software-Engineer at YallaPro (Backend data workflows, Python/SQL)"}
+${p.employmentHistory?.length ? p.employmentHistory.map(e => `- Role: ${e.title} at ${e.company}. ${e.description || ""}`).join("\n") : "غير متاح"}
 
 Education:
-${p.education?.length ? p.education.map(ed => `- ${ed.degree} at ${ed.institution}`).join("\n") : "- Computer Engineering at Ain Shams University"}
+${p.education?.length ? p.education.map(ed => `- ${ed.degree} at ${ed.institution}`).join("\n") : "غير متاح"}
 
 Certifications & Diplomas:
-${p.certifications?.length ? p.certifications.map(c => `- ${c.title} (${c.provider || ""})`).join("\n") : "- The AI Diploma (INSTANT)\n- Advanced Deep Learning Program (APPLAI)"}
+${p.certifications?.length ? p.certifications.map(c => `- ${c.title} (${c.provider || ""})`).join("\n") : "غير متاح"}
 
 Published Portfolio Items Count: ${p.portfolioCount !== undefined ? p.portfolioCount : (p.portfolioItems?.length || 0)}
 Published Project Catalog Count: ${p.catalogCount !== undefined ? p.catalogCount : 0}
 Has Video Introduction: ${p.hasVideo ? "Yes" : "No (None)"}
 
 Overview / Bio:
-${p.bio}
+${p.bio || "غير متاح"}
 
 Projects / Case Studies:
-${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${item.title}: ${item.description}`).join("\n\n") : "None (0 published portfolio case studies)"}
+${p.portfolioItems?.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${item.title}: ${item.description}`).join("\n\n") : "None (0 published portfolio case studies)"}
 `.trim();
 
     contents = [
@@ -1831,12 +1865,12 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
   const currentTitle =
     result?.currentTitle ||
     params.profileData?.headline ||
-    "AI & Data Engineer | NLP & Deep Learning Specialist";
+    "مستقل محترف";
 
   const freelancerName =
     result?.freelancerName ||
     params.profileData?.fullName ||
-    "Mostafa Asaad";
+    "مستقل محترف";
 
   const avatarUrl =
     params.profileData?.avatarUrl ||
@@ -1844,7 +1878,7 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
     (typeof params.rawText === "string" ? extractAvatarFromText(params.rawText) : null) ||
     null;
 
-  // Calculate Deterministic Score (guarantees ~50% for new/incomplete profiles matching Vollna)
+  // Calculate Deterministic Score
   const portfolioCount =
     typeof result?.sections?.portfolio?.currentCount === "number"
       ? result.sections.portfolio.currentCount
@@ -1857,10 +1891,10 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
 
   const skillsCount =
     result?.sections?.skills?.usedSlots ||
-    (params.profileData?.skills?.length || 8);
+    (params.profileData?.skills?.length || 0);
 
   const employmentCount =
-    (result?.sections?.experience?.employmentRewrites?.length || params.profileData?.employmentHistory?.length || 1);
+    (result?.sections?.experience?.employmentRewrites?.length || params.profileData?.employmentHistory?.length || 0);
 
   const hasVideo = Boolean(result?.sections?.video?.hasVideo || params.profileData?.hasVideo);
 
@@ -1877,21 +1911,48 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
 
   const overallScore = calculatedScore;
 
-  // Stats block
+  // Stats block - leave empty/unspecified if missing
   const stats = {
-    totalJobs: params.profileData?.totalJobs || result?.stats?.totalJobs || "1",
-    totalHours: params.profileData?.totalHours || result?.stats?.totalHours || "0",
-    hourlyRate: params.profileData?.hourlyRate || result?.stats?.hourlyRate || "$15.00/hr",
-    activeContracts: params.profileData?.activeContracts || result?.stats?.activeContracts || ["LBLX116..."],
+    totalJobs: params.profileData?.totalJobs || result?.stats?.totalJobs || "",
+    totalHours: params.profileData?.totalHours || result?.stats?.totalHours || "",
+    hourlyRate: params.profileData?.hourlyRate || result?.stats?.hourlyRate || "",
+    activeContracts: params.profileData?.activeContracts || result?.stats?.activeContracts || [],
   };
+
+  const activeContractsCount = stats.activeContracts.length;
+  const metricsParts: string[] = [];
+  if (stats.totalJobs) metricsParts.push(`${stats.totalJobs} completed job(s)`);
+  if (stats.totalHours) metricsParts.push(`${stats.totalHours} tracked hours`);
+  if (stats.hourlyRate) metricsParts.push(`rate of ${stats.hourlyRate}`);
+  if (activeContractsCount > 0) metricsParts.push(`${activeContractsCount} active contract(s)`);
+
+  const metricsDesc = metricsParts.length > 0 ? metricsParts.join(", ") : "no public job history yet";
 
   const executiveSummary =
     result?.executiveSummary ||
-    `This is an early-stage profile with ${stats.totalJobs} completed job, ${stats.activeContracts.length} active in-progress contract (${stats.activeContracts[0] || "LBLX116..."}), ${stats.totalHours} tracked hours, and an initial rate of ${stats.hourlyRate}. The most critical gaps holding back your search impressions and conversion are: 0 Portfolio case studies, 0 Project Catalog packages, utilizing only ${skillsCount} of 20 available skill slots, having a single brief employment entry ('Software Engineer at YallaPro') lacking keyword density, and opening your overview with a freelancer-centric statement ('As a dedicated...').`;
+    `Profile evaluation for ${freelancerName} (${currentTitle}): currently showing ${metricsDesc}. Key areas to optimize include completing all available skill slots (currently using ${skillsCount}/20), adding documented portfolio case studies, and ensuring your profile overview opens with a strong, client-centric value proposition.`;
+
+  const proofBullets: string[] = [];
+  if (params.profileData?.education?.length) {
+    params.profileData.education.forEach((ed) => proofBullets.push(`🎓 ${ed.degree} - ${ed.institution}`));
+  }
+  if (params.profileData?.certifications?.length) {
+    params.profileData.certifications.forEach((c) =>
+      proofBullets.push(`📜 ${c.title}${c.provider ? ` (${c.provider})` : ""}`)
+    );
+  }
+  if (params.profileData?.employmentHistory?.length) {
+    params.profileData.employmentHistory.forEach((e) => proofBullets.push(`💼 ${e.title} at ${e.company}`));
+  }
+  if (proofBullets.length === 0) {
+    proofBullets.push("🎓 Verified technical and academic background");
+    proofBullets.push("💼 Hands-on experience delivering reliable, high-quality deliverables");
+    proofBullets.push("⭐ Strong client commitment and clear milestone communication");
+  }
 
   const defaultOverview =
     result?.sections?.overview?.fullRewrittenOverview ||
-    `Turn raw text and complex data pipelines into production-ready NLP models that drive automation and business decisions.\n\nSpecializing in end-to-end Machine Learning and NLP engineering—from fine-tuning Transformer architectures (BERT, RoBERTa, LLaMA) to deploying scalable PostgreSQL schemas and data pipelines.\n\n• High-performance NLP model fine-tuning with evaluation metrics & Gradio demos\n• Automated API data extraction and ETL data engineering into PostgreSQL\n• Named Entity Recognition (NER), Sentiment Analysis, and Intent Classification\n• Production-grade Python scripts with clean architecture and documentation\n\nProof of Expertise:\n🎓 B.Sc. in Computer Engineering from Ain Shams University\n📜 Graduate of The AI Diploma (INSTANT) & Advanced Deep Learning Program (APPLAI)\n💼 Software Engineer at YallaPro: backend data workflows, SQL optimization, and Python scripts\n\nReady to elevate your project? Send a direct message today to get started.`;
+    `Help clients turn complex requirements into high-performing, scalable digital solutions that drive measurable business results.\n\nSpecializing in ${currentTitle} with a strong focus on clean architecture, performance, and dependable execution.\n\n• End-to-end development tailored to your specific project needs\n• Robust, maintainable code following modern industry best practices\n• Clear, consistent communication and on-time project milestones\n• Post-delivery support and flexible collaboration\n\nProof of Expertise:\n${proofBullets.join("\n")}\n\nReady to elevate your project? Send a direct message today to get started.`;
 
   return {
     freelancerName,
@@ -1906,7 +1967,7 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
         currentText: result?.sections?.title?.currentText || currentTitle,
         analysis:
           result?.sections?.title?.analysis ||
-          "The current title mixes Data Engineering and NLP/Deep Learning, which are distinct search categories on Upwork with different client intents. Choosing a clear primary niche will increase relevant search impressions and match high-ticket contracts.",
+          "A focused, high-intent title aligned directly with your primary service niche increases search impressions and attracts serious, high-ticket clients.",
         suggestions:
           Array.isArray(result?.sections?.title?.suggestions) &&
             result.sections.title.suggestions.length > 0
@@ -1915,17 +1976,17 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
               {
                 label: "Primary recommendation",
                 subtitle: "Clear niche & high client search intent",
-                content: "NLP & Deep Learning Engineer | Transformers, LLMs & Python",
+                content: `${currentTitle} | Specialist & Consultant`,
               },
               {
                 label: "Alternative 1",
-                subtitle: "Outcome-focused title targeting business automation",
-                content: "AI Engineer | Custom NLP Models, Classification & NER Solutions",
+                subtitle: "Outcome-focused title targeting client business results",
+                content: `Senior ${currentTitle} | High-Impact Solutions`,
               },
               {
                 label: "Alternative 2",
-                subtitle: "Data pipelines & database-centric contracts",
-                content: "Data Engineer | Python, PostgreSQL & Automated ETL Pipelines",
+                subtitle: "Focused on end-to-end delivery & reliability",
+                content: `${currentTitle} | End-to-End Implementation`,
               },
             ],
       },
@@ -1949,34 +2010,30 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
                 id: "hook",
                 title: "Hook",
                 subtitle: "First line earns the scroll.",
-                content: "Turn raw text and complex data pipelines into production-ready NLP models that drive automation and business decisions.",
+                content: `Help businesses turn complex requirements into high-performing, scalable solutions that drive measurable business outcomes.`,
               },
               {
                 id: "unique_value",
                 title: "Unique value",
                 subtitle: "What only you bring.",
-                content: "Specializing in end-to-end Machine Learning and NLP engineering—from fine-tuning Transformer architectures (BERT, RoBERTa, LLaMA) to deploying scalable PostgreSQL schemas and data pipelines.",
+                content: `Specializing in ${currentTitle} with an uncompromising focus on clean architecture, reliable performance, and transparent communication.`,
               },
               {
                 id: "how_you_help",
                 title: "How you help",
                 subtitle: "Outcomes you deliver.",
                 bullets: [
-                  "High-performance NLP model fine-tuning with evaluation metrics & Gradio demos",
-                  "Automated API data extraction and ETL data engineering into PostgreSQL",
-                  "Named Entity Recognition (NER), Sentiment Analysis, and Intent Classification",
-                  "Production-grade Python scripts with clean architecture and documentation",
+                  "End-to-end execution from initial scoping to final production deployment",
+                  "Robust, maintainable solutions adhering to industry best practices",
+                  "Clear milestone updates and proactive problem-solving",
+                  "Post-delivery verification and seamless handover documentation",
                 ],
               },
               {
                 id: "proof",
                 title: "Proof",
                 subtitle: "Evidence of results.",
-                bullets: [
-                  "🎓 B.Sc. in Computer Engineering from Ain Shams University",
-                  "📜 Graduate of The AI Diploma (INSTANT) & Advanced Deep Learning Program (APPLAI)",
-                  "💼 Software Engineer at YallaPro: backend data workflows, SQL optimization, and Python scripts",
-                ],
+                bullets: proofBullets,
               },
               {
                 id: "cta",
@@ -1997,37 +2054,22 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
             ? result.sections.skills.currentSkills
             : (params.profileData?.skills?.length
               ? params.profileData.skills
-              : ["Python", "Data Engineering", "Natural Language Processing", "Deep Learning", "Machine Learning", "SQL", "Relational Database", "PostgreSQL"]),
+              : []),
         analysis:
           result?.sections?.skills?.analysis ||
-          `Only ${skillsCount} of 20 slots are used, and the set leans toward databases. Add only the relevant skills you actually use to maximize search reach and client matching.`,
+          (skillsCount < 10
+            ? `Only ${skillsCount} of 20 skill slots are currently utilized. Adding targeted, in-demand keywords matching your specialty will improve your search reach and client matching.`
+            : `Utilizing ${skillsCount} of 20 skill slots. Review your top skills periodically to ensure they match current high-volume client searches.`),
         skillsToAdd:
           Array.isArray(result?.sections?.skills?.skillsToAdd) &&
             result.sections.skills.skillsToAdd.length > 0
             ? result.sections.skills.skillsToAdd
-            : [
-              "Machine Learning Model",
-              "Data Science",
-              "Data Analysis",
-              "ETL Pipeline",
-              "Transformers",
-              "Hugging Face",
-              "Generative AI",
-              "Data Mining",
-              "TensorFlow",
-              "Text Classification",
-              "AI Model Training",
-            ],
+            : [],
         skillsToReorder:
           Array.isArray(result?.sections?.skills?.skillsToReorder) &&
             result.sections.skills.skillsToReorder.length > 0
             ? result.sections.skills.skillsToReorder
-            : [
-              { skill: "Machine Learning", fromRank: 5, toRank: 1 },
-              { skill: "Natural Language Processing", fromRank: 3, toRank: 2 },
-              { skill: "Deep Learning", fromRank: 4, toRank: 3 },
-              { skill: "Python", fromRank: 1, toRank: 4 },
-            ],
+            : [],
       },
       portfolio: {
         status: (result?.sections?.portfolio?.status as VollnaSectionStatus) || (portfolioCount === 0 ? "warning" : "good"),
@@ -2044,19 +2086,14 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
             ? result.sections.portfolio.projectIdeas
             : [
               {
-                title: "Custom Domain NLP Text Classification & Sentiment Pipeline",
-                description: "Train and evaluate a domain-specific text classification model on customer feedback, using LSTM or fine-tuned Transformer models with clean Python evaluation code and Gradio demo.",
-                whyItWorks: "Directly showcases your core NLP skills and addresses the highest-volume client search query in AI.",
+                title: `Case Study & Client Deliverable in ${currentTitle}`,
+                description: "Document a real-world project demonstrating problem analysis, chosen solution, key technologies, and final measurable outcomes.",
+                whyItWorks: "Directly showcases your core capabilities and addresses client search intent.",
               },
               {
-                title: "Automated API Data Extraction & PostgreSQL Ingestion Pipeline",
-                description: "An automated data engineering pipeline fetching JSON payloads from external APIs, validating data schemas, and loading indexed relational records into PostgreSQL.",
-                whyItWorks: "Backs up the Data Engineering title claim with verifiable proof of database and ETL competence.",
-              },
-              {
-                title: "Named Entity Recognition (NER) & Information Extraction Model",
-                description: "Custom NER model extracting specialized domain terms from unstructured documents with performance metrics report and deployment script.",
-                whyItWorks: "High-ticket business clients frequently look for custom NER to automate document processing.",
+                title: "Production-Grade Solution & Implementation Architecture",
+                description: "Showcase an end-to-end system with structured documentation, test coverage, and deployment details.",
+                whyItWorks: "Demonstrates engineering maturity, attention to quality, and reliable execution.",
               },
             ],
       },
@@ -2066,34 +2103,36 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
         alertMessage:
           result?.sections?.experience?.alertMessage ||
           (employmentCount <= 1
-            ? "Only 1 employment entry. Add a second real entry (internship, freelance, or project-based role) with niche keywords."
-            : "Employment entries provide high-leverage relevance signals for Upwork search."),
+            ? "Limited employment history entries detected. Adding past project roles, freelance engagements, or company positions strengthens profile credibility."
+            : "Employment entries provide high-leverage relevance signals for platform search indexing."),
         rolesToAdd:
           Array.isArray(result?.sections?.experience?.rolesToAdd) &&
             result.sections.experience.rolesToAdd.length > 0
             ? result.sections.experience.rolesToAdd
             : [
               {
-                title: "Machine Learning / NLP Engineer (Projects & Training)",
-                description: "Only add this if it reflects real experience, such as freelance, academic, or intensive training projects.",
+                title: `${currentTitle} (Freelance & Client Projects)`,
+                description: "Document your independent consulting and project engagements with quantifiable client outcomes.",
               },
             ],
         employmentHistoryNote:
           result?.sections?.experience?.employmentHistoryNote ||
-          "Current employment lists Software-Engineer at YallaPro. While genuine, expanding the title and bullet points with niche keywords will significantly boost search indexing on Upwork.",
+          (employmentCount === 0
+            ? "No employment history listed. Adding verified roles or project history improves client trust."
+            : `Detected ${employmentCount} employment entry. Optimizing job titles and bullet points with niche keywords will significantly boost search indexing.`),
         employmentRewrites:
           Array.isArray(result?.sections?.experience?.employmentRewrites) &&
             result.sections.experience.employmentRewrites.length > 0
             ? result.sections.experience.employmentRewrites
-            : [
-              {
-                currentRole: "Software-Engineer",
-                company: "YallaPro",
-                recommendedTitle: "Software Engineer | AI, NLP & Data Pipelines",
-                recommendedDescription: "Developed and maintained software features and backend data workflows, optimizing PostgreSQL queries, implementing automated ETL data scripts, and integrating machine learning utilities with Python.",
-                whyItWorks: "Keeps the real job title but adds niche keywords, since employment title and description are high-leverage relevance signals on Upwork.",
-              },
-            ],
+            : (params.profileData?.employmentHistory?.length
+              ? params.profileData.employmentHistory.map((e) => ({
+                currentRole: e.title,
+                company: e.company,
+                recommendedTitle: `${e.title} | ${currentTitle}`,
+                recommendedDescription: e.description || "Delivered high-impact solutions, collaborated on technical deliverables, and maintained clean documentation and reliable execution.",
+                whyItWorks: "Keeps the real job title while adding niche keywords for higher search indexing relevance.",
+              }))
+              : []),
         suggestedAdditions:
           Array.isArray(result?.sections?.experience?.suggestedAdditions) &&
             result.sections.experience.suggestedAdditions.length > 0
@@ -2101,18 +2140,13 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
             : [
               {
                 type: "Certification",
-                title: "Hugging Face / NLP course certification",
-                description: "Adds a recognized NLP credential that supports your niche and trust.",
+                title: "Industry certification in your primary discipline",
+                description: "Adds recognized credentials supporting your domain authority and client trust.",
               },
               {
-                type: "Certification",
-                title: "Cloud or ML certification (e.g., AWS, Google Cloud, or TensorFlow)",
-                description: "Supports the deployment and scalability claims in your overview.",
-              },
-              {
-                type: "Open source",
-                title: "Open-source NLP project on GitHub",
-                description: "Gives clients verifiable proof of your NER and classification work.",
+                type: "Project Showcase",
+                title: "Public code repository or verifiable case study",
+                description: "Provides potential clients with immediate, verifiable proof of your work.",
               },
             ],
       },
@@ -2123,7 +2157,7 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
           result?.sections?.video?.analysis ||
           (hasVideo
             ? "Your introduction video provides instant credibility and human connection."
-            : "No introduction video detected. Profiles with a 30-60 second video introduction see up to 3x higher invitation rates and faster hiring decisions because it establishes immediate trust and verifies communication skills."),
+            : "No introduction video detected. Profiles with a 30-60 second video introduction see higher invitation rates and faster hiring decisions because it establishes immediate trust and verifies communication skills."),
         scriptSections:
           Array.isArray(result?.sections?.video?.scriptSections) &&
             result.sections.video.scriptSections.length > 0
@@ -2131,15 +2165,15 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
             : [
               {
                 title: "Hook (0-10s)",
-                content: `Hi there! I'm ${freelancerName}. I help businesses turn complex text and unstructured data into high-accuracy NLP models and automated pipelines.`,
+                content: `Hi there! I'm ${freelancerName}. I help clients build and deliver high-impact solutions as a ${currentTitle}.`,
               },
               {
                 title: "Value & Proof (10-35s)",
-                content: "Whether you need a custom text classification system, named entity recognition, or clean ETL data workflows connected to PostgreSQL, I write clean, maintainable Python code that integrates seamlessly into your production stack.",
+                content: "Whether you need end-to-end development, architecture optimization, or reliable execution, I write clean, maintainable code and deliver results that align with your business goals.",
               },
               {
                 title: "Call to Action (35-45s)",
-                content: "If you're looking for an engineer who communicates clearly and delivers reliable results on time, send me a message or invite me to your job. Let's discuss your project!",
+                content: "If you're looking for a professional who communicates clearly and delivers reliable results on time, send me a message or invite me to your job. Let's discuss your project!",
               },
             ],
       },
@@ -2163,19 +2197,14 @@ ${p.portfolioItems.length ? p.portfolioItems.map((item, idx) => `${idx + 1}. ${i
             ? result.sections.catalog.projectIdeas
             : [
               {
-                title: "You will get a custom NLP text classification model",
-                description: "I will train and evaluate a text classification model on your data, using LSTM or fine-tuned Transformer models. Includes data preprocessing, evaluation metrics, clean Python code and a short usage guide.",
-                rationale: "Matches a common client search and can help visibility with the NLP keyword.",
+                title: `You will get a custom solution in ${currentTitle}`,
+                description: "End-to-end delivery of a tailored implementation with clean architecture, testing, and full documentation.",
+                rationale: "Addresses high-volume client searches for productized, fixed-price services.",
               },
               {
-                title: "You will get a Named Entity Recognition (NER) model",
-                description: "I will build an NER model for your domain text, comparing sequence models and Transformers. Includes training code, evaluation report and a Gradio demo to test results.",
-                rationale: "A specific, productized service that reflects your skills.",
-              },
-              {
-                title: "You will get an automated data pipeline with PostgreSQL",
-                description: "I will build an automated API data-fetching pipeline that loads clean data into a well-designed PostgreSQL schema, with optimized SQL queries and documentation.",
-                rationale: "Covers your data engineering side and adds another keyword placement.",
+                title: "You will get a comprehensive technical audit and optimization",
+                description: "In-depth review of existing architecture, bottleneck analysis, and prioritized action plan with code fixes.",
+                rationale: "A low-friction, high-trust entry service to convert clients into long-term retainers.",
               },
             ],
       },

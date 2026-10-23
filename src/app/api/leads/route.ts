@@ -7,7 +7,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { PLATFORMS_METADATA, PROJECT_INSIGHT_KEYS } from '@/lib/scrapers/types';
+import {
+  PLATFORMS_METADATA,
+  PROJECT_INSIGHT_KEYS,
+  extractTitleFromPostText,
+  extractDetailsFromPostText,
+} from '@/lib/scrapers/types';
+import { calculateClientScore } from '@/lib/scoring/client-scorer';
 import { triggerIngest, pageLoadTriggersEnabled } from '@/lib/cron/trigger';
 import { getRates } from '@/lib/currency/rates';
 import { getProjectPricing } from '@/lib/insights/pricing';
@@ -15,6 +21,15 @@ import { getProjectPricing } from '@/lib/insights/pricing';
 const ALL_PLATFORM_IDS = PLATFORMS_METADATA.map((p) => p.id);
 
 export const dynamic = 'force-dynamic';
+
+function extractBudgetBadge(text: string): string | null {
+  if (!text) return null;
+  const match = text.match(/الميزانية:\s*([^\n\r]+)/i);
+  if (match && match[1]) return match[1].trim();
+  const general = text.match(/(?:[$€£]\s*\d+[\s\d\-–toإلى$€£]+|\d+\s*(?:USD|SAR|EGP|درهم|ريال|دولار))/i);
+  if (general) return general[0].trim();
+  return null;
+}
 
 /**
  * Adds competition & client signals, the EGP budget and a suggested bid from `projects` to each lead.
@@ -31,11 +46,12 @@ async function attachProjectInsights(leads: any[]): Promise<any[]> {
   }
 
   const PRICING_KEYS = ['budget_min', 'budget_max', 'currency', 'category'];
+  const PROJECT_EXTRA_KEYS = ['title', 'description', 'budget', 'author', 'url'];
   const rowsByKey = new Map<string, Record<string, any>>();
   await Promise.all(
     Array.from(idsByPlatform.entries()).map(async ([platform, ids]) => {
       const { data, error } = await (supabaseAdmin.from('projects') as any)
-        .select(['id', 'external_id', ...PRICING_KEYS, ...PROJECT_INSIGHT_KEYS].join(','))
+        .select(['id', 'external_id', ...PROJECT_EXTRA_KEYS, ...PRICING_KEYS, ...PROJECT_INSIGHT_KEYS].join(','))
         .eq('platform', platform)
         .in('external_id', ids);
       if (!error) {
@@ -49,9 +65,34 @@ async function attachProjectInsights(leads: any[]): Promise<any[]> {
   return Promise.all(
     leads.map(async (lead) => {
       const row = rowsByKey.get(lead.external_post_id);
-      if (!row) return { ...lead, project_id: null, insights: null, pricing: null };
+      const title = row?.title || lead.title || extractTitleFromPostText(lead.post_text);
+      const description = row?.description || lead.description || extractDetailsFromPostText(lead.post_text);
+      const budget = row?.budget || lead.budget || extractBudgetBadge(lead.post_text);
+      const author = row?.author || lead.author || lead.author_handle || 'صاحب المشروع';
+      const post_url = row?.url || lead.post_url;
 
-      const { id: project_id, external_id, budget_min, budget_max, currency, category, ...insights } = row;
+      if (!row) {
+        const clientEvaluation = calculateClientScore({
+          platform: lead.platform,
+          title,
+          description,
+          budget,
+          author,
+        });
+        return {
+          ...lead,
+          title,
+          description,
+          budget,
+          author,
+          post_url,
+          project_id: null,
+          insights: { client_evaluation: clientEvaluation },
+          pricing: null,
+        };
+      }
+
+      const { id: project_id, external_id, title: _t, description: _d, budget: _b, author: _a, url: _u, budget_min, budget_max, currency, category, ...insights } = row;
       const pricing = await getProjectPricing(
         {
           platform: lead.platform,
@@ -66,7 +107,36 @@ async function attachProjectInsights(leads: any[]): Promise<any[]> {
         rates
       ).catch(() => null);
 
-      return { ...lead, project_id, insights, pricing };
+      const clientEvaluation = calculateClientScore({
+        platform: lead.platform,
+        title,
+        description,
+        budget,
+        budget_usd_estimate: pricing?.suggestion?.priceUsd,
+        author,
+        insights,
+        client_hire_rate: insights.client_hire_rate,
+        client_open_projects: insights.client_open_projects,
+        client_in_progress: insights.client_in_progress,
+        client_registered_at: insights.client_registered_at,
+        client_country: insights.client_country,
+        duration_text: insights.duration_text,
+        bids_count: insights.bids_count,
+      });
+
+      (insights as any).client_evaluation = clientEvaluation;
+
+      return {
+        ...lead,
+        title,
+        description,
+        budget,
+        author,
+        post_url,
+        project_id,
+        insights,
+        pricing,
+      };
     })
   );
 }

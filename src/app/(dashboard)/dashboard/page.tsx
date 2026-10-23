@@ -21,6 +21,11 @@ import {
   AlertTriangle,
   X,
   FileText,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  Lightbulb,
+  ChevronDown,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -32,6 +37,12 @@ import {
   extractTitleFromPostText,
   extractDetailsFromPostText,
 } from "@/lib/scrapers/types";
+import {
+  calculateClientScore,
+  ClientEvaluation,
+  getClientBadgeStyles,
+  buildPlatformMetricsChips,
+} from "@/lib/scoring/client-scorer";
 import {
   getCompetitionVerdict,
   getClientVerdict,
@@ -150,6 +161,295 @@ function AiScoreBadge({ action }: { action?: TrackedProjectAction }) {
   );
 }
 
+/** Resolves or calculates ClientEvaluation for a lead or item */
+function resolveClientEvaluation(data: any): ClientEvaluation {
+  if (data?.insights?.client_evaluation) {
+    const ev = { ...data.insights.client_evaluation };
+    if (!ev.metricsChips || ev.metricsChips.length === 0) {
+      ev.metricsChips = buildPlatformMetricsChips({
+        platform: data?.platform || ev.platform || "",
+        hireRate: ev.hireRate,
+        openProjects: ev.openProjects,
+        inProgressProjects: ev.inProgressProjects,
+        paymentVerified: ev.paymentVerified,
+        clientCountry: ev.clientCountry,
+        clientProfession: ev.clientProfession,
+        clientRating: ev.clientRating,
+        totalSpent: ev.totalSpent,
+        score: ev.score,
+      });
+    }
+    return ev;
+  }
+  return calculateClientScore({
+    platform: data?.platform,
+    title: data?.title || extractTitleFromPostText(data?.post_text || ""),
+    description: data?.description || extractDetailsFromPostText(data?.post_text || ""),
+    budget: data?.budget || extractBudgetBadge(data?.post_text || ""),
+    budget_usd_estimate: data?.pricing?.suggestion?.priceUsd,
+    author: data?.author,
+    insights: data?.insights,
+    client_hire_rate: data?.insights?.client_hire_rate,
+    client_open_projects: data?.insights?.client_open_projects,
+    client_in_progress: data?.insights?.client_in_progress,
+    client_registered_at: data?.insights?.client_registered_at,
+    client_country: data?.insights?.client_country,
+    duration_text: data?.insights?.duration_text,
+    bids_count: data?.insights?.bids_count,
+  });
+}
+
+/** Client Intelligence Card: Dynamic Platform Chips + Green & Red Flags + Negotiation Advice */
+function ClientIntelligenceCard({
+  evaluation,
+  onClose,
+  compact = false,
+  projectTitle,
+  platform,
+}: {
+  evaluation: ClientEvaluation;
+  onClose?: () => void;
+  compact?: boolean;
+  projectTitle?: string;
+  platform?: string;
+}) {
+  const styles = getClientBadgeStyles(evaluation.score);
+  const targetPlatform = platform || evaluation.platform || "";
+  const chips =
+    evaluation.metricsChips && evaluation.metricsChips.length > 0
+      ? evaluation.metricsChips
+      : buildPlatformMetricsChips({
+          platform: targetPlatform,
+          hireRate: evaluation.hireRate,
+          openProjects: evaluation.openProjects,
+          inProgressProjects: evaluation.inProgressProjects,
+          paymentVerified: evaluation.paymentVerified,
+          clientCountry: evaluation.clientCountry,
+          clientProfession: evaluation.clientProfession,
+          clientRating: evaluation.clientRating,
+          totalSpent: evaluation.totalSpent,
+          score: evaluation.score,
+        });
+
+  return (
+    <div
+      className="rounded-3xl border border-slate-200 bg-white shadow-2xl text-right p-5 sm:p-6 transition-all w-full text-xs"
+      onClick={(e) => e.stopPropagation()}
+      dir="rtl"
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between pb-4 mb-4 border-b border-slate-100 gap-3">
+        <div className="flex items-center gap-3">
+          <div
+            className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 border ${styles.bg} ${styles.border}`}
+          >
+            <span>{styles.icon}</span>
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-black text-slate-900 text-base">{styles.title}</span>
+              <span
+                className={`font-mono font-black px-2.5 py-0.5 rounded-full text-xs ${styles.bg} ${styles.text} border ${styles.border}`}
+              >
+                {evaluation.score.toFixed(1)} / 10
+              </span>
+              {targetPlatform && <PlatformBadge platform={targetPlatform} />}
+            </div>
+            <p className="text-xs font-bold text-slate-600 mt-1">{evaluation.labelAr}</p>
+            {projectTitle && (
+              <p className="text-[11px] text-slate-400 line-clamp-1 mt-0.5 font-sans">
+                {projectTitle}
+              </p>
+            )}
+          </div>
+        </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition shrink-0"
+            title="إغلاق النافذة"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+      </div>
+
+      {/* Dynamic Platform-Tailored Metrics Chips */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        {chips.map((chip, idx) => {
+          const toneStyles =
+            chip.tone === "positive"
+              ? "bg-emerald-50/80 border-emerald-200/90 text-emerald-950"
+              : chip.tone === "warning"
+                ? "bg-amber-50/80 border-amber-200/90 text-amber-950"
+                : chip.tone === "accent"
+                  ? "bg-indigo-50/80 border-indigo-200/90 text-indigo-950"
+                  : "bg-slate-50 border-slate-200 text-slate-900";
+
+          return (
+            <div
+              key={idx}
+              className={`p-3.5 sm:p-4 rounded-2xl border ${toneStyles} flex flex-col justify-between min-h-[84px] shadow-2xs transition`}
+            >
+              <div>
+                <span className="text-[11px] font-bold opacity-75 block mb-1.5 leading-tight">
+                  {chip.label}
+                </span>
+                <div className="font-black text-xs sm:text-[13px] flex items-center gap-1.5 leading-snug break-words">
+                  {chip.icon && <span className="text-sm shrink-0">{chip.icon}</span>}
+                  <span className="leading-snug break-words">{chip.value}</span>
+                </div>
+              </div>
+              {chip.subtext && (
+                <span className="text-[10px] leading-snug opacity-70 mt-2 block font-medium break-words">
+                  {chip.subtext}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Green Flags (مميزات العميل ونقاط القوة) */}
+      <div className="mb-4">
+        <div className="flex items-center gap-1.5 text-xs font-black text-emerald-800 mb-2">
+          <span className="w-5 h-5 rounded-md bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold">
+            ✓
+          </span>
+          <span>مميزات العميل ونقاط القوة ({evaluation.greenFlags.length}):</span>
+        </div>
+        {evaluation.greenFlags.length > 0 ? (
+          <ul className="space-y-1.5">
+            {evaluation.greenFlags.map((flag, idx) => (
+              <li
+                key={idx}
+                className="text-xs text-emerald-800 bg-emerald-50/80 border border-emerald-200/70 px-3 py-2 rounded-xl leading-relaxed flex items-start gap-2"
+              >
+                <span className="text-emerald-600 font-bold mt-0.5 shrink-0">✓</span>
+                <span className="font-medium">{flag}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 p-3 rounded-xl">
+            لا توجد مميزات إضافية مسجلة حالياً - المشروع يخضع لنظام الحماية الافتراضي للمنصة.
+          </div>
+        )}
+      </div>
+
+      {/* Red Flags (مؤشرات الخطر والتحذيرات) */}
+      <div className="mb-4">
+        <div className="flex items-center gap-1.5 text-xs font-black text-slate-800 mb-2">
+          <span className="w-5 h-5 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center text-xs font-bold">
+            ⚠️
+          </span>
+          <span>مؤشرات الخطر والتحذيرات ({evaluation.redFlags.length}):</span>
+        </div>
+        {evaluation.redFlags.length > 0 ? (
+          <ul className="space-y-1.5">
+            {evaluation.redFlags.map((flag, idx) => (
+              <li
+                key={idx}
+                className="text-xs text-rose-800 bg-rose-50/80 border border-rose-200/70 px-3 py-2 rounded-xl leading-relaxed flex items-start gap-2"
+              >
+                <span className="text-rose-600 font-bold mt-0.5 shrink-0">⚠</span>
+                <span className="font-medium">{flag}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="text-xs text-emerald-800 bg-emerald-50/90 border border-emerald-200 p-3 rounded-xl flex items-center gap-2 font-bold">
+            <span className="text-emerald-600 text-sm">🛡️</span>
+            <span>سجل العميل نظيف: لا توجد أي تحذيرات أو مؤشرات خطر مسجلة على هذا المشروع!</span>
+          </div>
+        )}
+      </div>
+
+      {/* Strategic Negotiation Tip */}
+      {evaluation.negotiationTipAr && (
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 border border-amber-200 shadow-2xs mb-4">
+          <div className="flex items-center gap-1.5 text-xs font-black text-amber-900 mb-1.5">
+            <Lightbulb className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>نصيحة تفاوضية ذكية للفريلانسر:</span>
+          </div>
+          <p className="text-xs text-amber-900 leading-relaxed font-sans font-medium">
+            {evaluation.negotiationTipAr}
+          </p>
+        </div>
+      )}
+
+      {/* Close Button Footer */}
+      {onClose && (
+        <div className="pt-3 border-t border-slate-100 flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition shadow-xs"
+          >
+            إغلاق النافذة
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Interactive Client Score Pill with Full Dialog Modal */
+function ClientScorePill({ data }: { data: any }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const evaluation = resolveClientEvaluation(data);
+  const styles = getClientBadgeStyles(evaluation.score);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setIsOpen(true);
+        }}
+        title="انقر هنا لعرض التقرير الكامل لموثوقية العميل، نقاط القوة، التحذيرات، والنصيحة التفاوضية"
+        className={`group px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all flex items-center gap-1.5 cursor-pointer select-none shadow-2xs hover:shadow-md hover:scale-[1.02] active:scale-95 ${styles.bg} ${styles.border} ${styles.text}`}
+      >
+        <span className="text-sm shrink-0">{styles.icon}</span>
+        <span className="font-bold">{styles.title}</span>
+        <span className="font-mono font-black px-1.5 py-0.2 rounded-md bg-white/70 dark:bg-black/20 border border-black/5">
+          {evaluation.score.toFixed(1)}/10
+        </span>
+        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold bg-white/80 dark:bg-black/30 px-1.5 py-0.5 rounded-full border border-black/10 text-slate-700 group-hover:bg-slate-900 group-hover:text-white transition-colors duration-150">
+          <span>فحص العميل</span>
+          <ChevronDown className="w-3 h-3 group-hover:translate-y-0.5 transition-transform" />
+        </span>
+      </button>
+
+      {/* Full Centered Dialog Modal - Immune to clipping & overflow-hidden */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150"
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsOpen(false);
+          }}
+        >
+          <div
+            className="w-full max-w-2xl sm:max-w-3xl max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ClientIntelligenceCard
+              evaluation={evaluation}
+              onClose={() => setIsOpen(false)}
+              compact={false}
+              projectTitle={data?.title || extractTitleFromPostText(data?.post_text || "")}
+              platform={data?.platform}
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 interface TrackedItem {
   id: string;
   project_id: string;
@@ -232,6 +532,8 @@ export default function DashboardPage() {
   const [onlyHighIntent, setOnlyHighIntent] = useState(false);
   // Only projects the AI scored at/above the filter's threshold
   const [onlyAiFit, setOnlyAiFit] = useState(false);
+  // Hide risky / unverified / low hire-rate clients (< 6.0 / 10)
+  const [hideRiskyClients, setHideRiskyClients] = useState(false);
   const [sortBy, setSortBy] = useState<"newest" | "oldest">("newest");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -587,6 +889,10 @@ export default function DashboardPage() {
       if (typeof action?.ai_score !== "number") return false;
       if (action.ai_score < (action.ai_min_score ?? DEFAULT_AI_MIN_SCORE)) return false;
     }
+    if (hideRiskyClients) {
+      const clientEval = resolveClientEvaluation(lead);
+      if (clientEval.score < 6.0) return false;
+    }
     return true;
   });
   const hasAiScores = Object.values(trackedActions).some((a) => typeof a.ai_score === "number");
@@ -600,6 +906,10 @@ export default function DashboardPage() {
     }
     if (selectedPlatform !== "all" && item.platform !== selectedPlatform) return false;
     if (selectedCategory !== "all" && !isCategoryMatch(item.category, selectedCategory)) return false;
+    if (hideRiskyClients) {
+      const clientEval = resolveClientEvaluation(item);
+      if (clientEval.score < 6.0) return false;
+    }
     return true;
   });
 
@@ -788,6 +1098,22 @@ export default function DashboardPage() {
                 ))}
               </div>
 
+              {/* Hide Risky Clients Quick Filter */}
+              <button
+                type="button"
+                onClick={() => setHideRiskyClients((v) => !v)}
+                aria-pressed={hideRiskyClients}
+                title="إخفاء كل المشاريع ذات التقييم الأقل من 6/10 والتركيز على أصحاب المشاريع الجادين فقط"
+                className={`px-3 py-1.5 text-[11px] font-bold rounded-xl border transition flex items-center gap-1.5 ${
+                  hideRiskyClients
+                    ? "bg-slate-900 border-slate-900 text-white shadow-xs"
+                    : "bg-white border-slate-200 text-slate-700 hover:border-slate-300"
+                }`}
+              >
+                <span>🛡️</span>
+                <span>إخفاء العملاء الوهميين (أعلى من 6/10 فقط)</span>
+              </button>
+
               {hasAiScores && (
                 <button
                   type="button"
@@ -833,16 +1159,18 @@ export default function DashboardPage() {
                   return (
                     <div
                       key={item.id}
-                      className={`relative overflow-hidden bg-white border rounded-2xl shadow-xs transition-all duration-200 ${theme.cardBorder} ${theme.cardHoverBorder} hover:shadow-lg ${theme.cardGlow}`}
+                      className={`relative bg-white border rounded-2xl shadow-xs transition-all duration-200 ${theme.cardBorder} ${theme.cardHoverBorder} hover:shadow-lg ${theme.cardGlow}`}
                     >
                       {/* Top Brand Accent Stripe */}
-                      <div className={`h-1.5 w-full bg-gradient-to-r ${theme.topStripeGradient}`} />
+                      <div className={`h-1.5 w-full rounded-t-2xl bg-gradient-to-r ${theme.topStripeGradient}`} />
 
                       <div className="p-5 sm:p-6">
                         {/* Top Row: Platform Badge with Logo, Budget, Date, and Bookmark */}
                         <div className="flex items-center justify-between gap-3 mb-3">
                           <div className="flex items-center gap-2 flex-wrap">
                             <PlatformBadge platform={item.platform} />
+
+                            <ClientScorePill data={item} />
 
                             {item.budget && (
                               <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60 font-mono">
@@ -972,16 +1300,18 @@ export default function DashboardPage() {
                   return (
                     <div
                       key={lead.id}
-                      className={`relative overflow-hidden bg-white border rounded-2xl shadow-xs transition-all duration-200 ${theme.cardBorder} ${theme.cardHoverBorder} hover:shadow-lg ${theme.cardGlow}`}
+                      className={`relative bg-white border rounded-2xl shadow-xs transition-all duration-200 ${theme.cardBorder} ${theme.cardHoverBorder} hover:shadow-lg ${theme.cardGlow}`}
                     >
                       {/* Top Brand Accent Stripe */}
-                      <div className={`h-1.5 w-full bg-gradient-to-r ${theme.topStripeGradient}`} />
+                      <div className={`h-1.5 w-full rounded-t-2xl bg-gradient-to-r ${theme.topStripeGradient}`} />
 
                       <div className="p-5 sm:p-6">
                         {/* Top Row: Platform Badge with Logo, Time, Budget, and Save Bookmark Icon */}
                         <div className="flex items-center justify-between gap-3 mb-3">
                           <div className="flex items-center gap-2 flex-wrap">
                             <PlatformBadge platform={lead.platform} />
+
+                            <ClientScorePill data={lead} />
 
                             {budgetBadge && (
                               <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60 font-mono">
@@ -1131,6 +1461,9 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="space-y-4">
+                {/* Client Intelligence & Risk Card */}
+                <ClientIntelligenceCard evaluation={resolveClientEvaluation(proposalModalLead)} compact={false} />
+
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-800 leading-relaxed whitespace-pre-line font-sans">
                   {generatedProposal}
                 </div>

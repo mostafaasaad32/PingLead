@@ -115,10 +115,17 @@ export async function scrapeNafezlyCategory(
           .trim() || null;
       const bidsText = iconText('fa-ballot');
       const bidsDigits = bidsText?.match(/\d+/);
+      const isVerified =
+        cardContext.includes('fa-user-check') ||
+        cardContext.includes('fa-badge-check') ||
+        cardContext.includes('fa-check-circle') ||
+        cardContext.includes('موثق');
+
       const insights = {
         bids_count: bidsDigits ? parseInt(bidsDigits[0], 10) : null,
         duration_text: iconText('fa-business-time'),
         client_country: iconText('fa-map-marker-alt'),
+        payment_verified: isVerified,
       };
 
       // Extract description
@@ -140,9 +147,16 @@ export async function scrapeNafezlyCategory(
       // Category
       const detectedCat = classifyProjectCategory(`${cleanTitle} ${desc}`, categorySlug);
 
+      // Client profession/role on Nafezly (e.g. معيد جامعي, مصمم, مسوق, شركة)
+      const professionMatch = cardContext.match(/fa-suitcase[^"]*"[^>]*><\/span>\s*([^<\n\r]+)/i);
+      const clientProfession = professionMatch ? professionMatch[1].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim() : null;
+
       // Author extraction if present
       const authorMatch = cardContext.match(/data-profile-role="owner"[^>]*>([\s\S]*?)<\/a>/i);
-      const author = authorMatch ? authorMatch[1].replace(/<[^>]*>/g, '').trim() : 'عميل نفذلي';
+      let author = authorMatch ? authorMatch[1].replace(/<[^>]*>/g, '').trim() : 'عميل نفذلي';
+      if (author && clientProfession && !author.includes(clientProfession)) {
+        author = `${author} (${clientProfession})`;
+      }
 
       projects.push(
         createUnifiedProject({
