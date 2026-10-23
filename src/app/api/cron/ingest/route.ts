@@ -34,6 +34,9 @@ import {
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Max execution time for serverless/Edge
 
+// Max time the AI qualifier may hold up a cycle's alerts
+const QUALIFIER_BUDGET_MS = 6000;
+
 // Projects published longer ago than this never trigger a Telegram alert
 const ALERT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 
@@ -102,7 +105,9 @@ async function qualifyNewMatches(jobs: QualifierJob[], filters: UserFilter[]): P
           budget: j.item.project.budget,
           budget_usd: j.item.project.budget_usd_estimate,
         })),
-        skillsByUser.get(userId)
+        skillsByUser.get(userId),
+        // Alerts wait for the scores: unscored projects (slow AI) still alert, just without a score
+        QUALIFIER_BUDGET_MS
       );
       // Failed calls and projects the model skipped don't count against the quota
       const unscored = results.filter((r) => !r).length;

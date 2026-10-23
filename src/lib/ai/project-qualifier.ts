@@ -15,7 +15,8 @@ export const QUALIFIER_BATCH_SIZE = 10;
 export const DEFAULT_AI_MIN_SCORE = 70;
 
 const QUALIFIER_MODELS = ['gemini-flash-lite-latest', 'gemini-3.1-flash-lite'];
-const CALL_TIMEOUT_MS = 15000;
+/** Total time for one qualifyProjects() call (all batches run in parallel) */
+const DEFAULT_QUALIFY_BUDGET_MS = 20000;
 const MAX_ATTEMPTS = 4;
 
 export interface QualifierProject {
@@ -140,7 +141,8 @@ ${JSON.stringify(list)}
 export async function qualifyProjectsBatch(
   criteria: string,
   projects: QualifierProject[],
-  skills?: string[]
+  skills?: string[],
+  deadline: number = Date.now() + DEFAULT_QUALIFY_BUDGET_MS
 ): Promise<(QualifierResult | null)[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
@@ -169,6 +171,8 @@ export async function qualifyProjectsBatch(
 
   let lastError = 'no model answered';
   for (const model of QUALIFIER_MODELS) {
+    const remaining = deadline - Date.now();
+    if (remaining < 300) break;
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -176,7 +180,7 @@ export async function qualifyProjectsBatch(
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body,
-          signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+          signal: AbortSignal.timeout(remaining),
         }
       );
       if (!res.ok) {
@@ -213,8 +217,10 @@ export async function qualifyProjectsBatch(
 export async function qualifyProjects(
   criteria: string,
   projects: QualifierProject[],
-  skills?: string[]
+  skills?: string[],
+  budgetMs: number = DEFAULT_QUALIFY_BUDGET_MS
 ): Promise<{ results: (QualifierResult | null)[]; failed: number }> {
+  const deadline = Date.now() + budgetMs;
   const batches: QualifierProject[][] = [];
   for (let i = 0; i < projects.length; i += QUALIFIER_BATCH_SIZE) {
     batches.push(projects.slice(i, i + QUALIFIER_BATCH_SIZE));
@@ -223,7 +229,7 @@ export async function qualifyProjects(
   let failed = 0;
   const batchResults = await Promise.all(
     batches.map((batch) =>
-      qualifyProjectsBatch(criteria, batch, skills).catch((err) => {
+      qualifyProjectsBatch(criteria, batch, skills, deadline).catch((err) => {
         console.warn('[AI Qualifier]', err.message);
         failed += batch.length;
         return batch.map(() => null);

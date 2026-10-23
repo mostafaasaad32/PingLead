@@ -9,6 +9,7 @@
 
 import { UnifiedProject, FreelancePlatform, PROJECT_INSIGHT_KEYS, buildPostText } from './types';
 import { classifyProjectCategory } from '../filters/categorizer';
+import { classifyCategoriesWithAi } from '../ai/category-classifier';
 import { scrapeMostaqlCategory, fetchMostaqlProjectDetails } from './mostaql';
 import { scrapeNafezlyCategory } from './nafezly';
 import { scrapeKhamsatCategory } from './khamsat';
@@ -65,7 +66,7 @@ async function mergeAndEnrichInsights(projects: UnifiedProject[]): Promise<void>
   const lookups = await Promise.all(
     Array.from(byPlatform.entries()).map(async ([platform, ids]) => {
       const { data, error } = await (supabaseAdmin.from('projects') as any)
-        .select(['external_id', 'description', ...BUDGET_KEYS, ...PROJECT_INSIGHT_KEYS].join(','))
+        .select(['external_id', 'description', 'category', ...BUDGET_KEYS, ...PROJECT_INSIGHT_KEYS].join(','))
         .eq('platform', platform)
         .in('external_id', ids);
       return { platform, data, error };
@@ -88,6 +89,11 @@ async function mergeAndEnrichInsights(projects: UnifiedProject[]): Promise<void>
   for (const p of projects) {
     const prev = existing.get(`${p.platform}_${p.external_id}`);
     if (!prev) continue;
+    // Each project is classified once (when first seen); later cycles keep that category
+    if (prev.category) {
+      p.category = prev.category;
+      p.category_slug = prev.category;
+    }
     for (const key of PROJECT_INSIGHT_KEYS) {
       if (p[key] == null && prev[key] != null) (p as any)[key] = prev[key];
     }
@@ -100,6 +106,8 @@ async function mergeAndEnrichInsights(projects: UnifiedProject[]): Promise<void>
       for (const key of BUDGET_KEYS) (p as any)[key] = prev[key];
     }
   }
+
+  const platformCategoryHints = new Map<UnifiedProject, string>();
 
   // Read Mostaql pages that were never enriched (or were enriched before budgets were read), newest first
   const pending = projects
@@ -116,11 +124,8 @@ async function mergeAndEnrichInsights(projects: UnifiedProject[]): Promise<void>
       const { description, budget_min, budget_max, platform_category, ...insights } = d;
       Object.assign(p, insights);
       if (description && description.length > (p.description || '').length) p.description = description;
-      // Re-classify with the full description, using Mostaql's own category when the text is vague
-      if (platform_category) {
-        p.category = classifyProjectCategory(`${p.title} ${p.description}`, platform_category);
-        p.category_slug = p.category;
-      }
+      // Mostaql's own category (breadcrumb): a hint for classifying new projects below
+      if (platform_category) platformCategoryHints.set(p, platform_category);
       // The project page's budget range is authoritative
       if (budget_max) {
         p.budget_min = budget_min ?? budget_max;
@@ -130,6 +135,27 @@ async function mergeAndEnrichInsights(projects: UnifiedProject[]): Promise<void>
         p.budget_usd_estimate = budget_max;
       }
     });
+  }
+
+  // Classify projects seen for the first time with the AI (keyword categories were wrong for ~half
+  // of real projects). Capped in time; anything not classified keeps its keyword category.
+  const fresh = projects.filter((p) => !existing.has(`${p.platform}_${p.external_id}`));
+  if (fresh.length) {
+    const aiCategories = await classifyCategoriesWithAi(
+      fresh.map((p) => ({ title: p.title, description: p.description, platformCategory: platformCategoryHints.get(p) }))
+    );
+    fresh.forEach((p, i) => {
+      const hint = platformCategoryHints.get(p);
+      const category = aiCategories[i] ?? (hint ? classifyProjectCategory(`${p.title} ${p.description}`, hint) : null);
+      if (category) {
+        p.category = category;
+        p.category_slug = category;
+      }
+    });
+    const classified = aiCategories.filter(Boolean).length;
+    if (classified < fresh.length) {
+      console.warn(`[Aggregator] AI classified ${classified}/${fresh.length} new projects; the rest keep keyword categories.`);
+    }
   }
 
   // The leads_pool text (dashboard) embeds budget + description: rebuild it from the merged values
