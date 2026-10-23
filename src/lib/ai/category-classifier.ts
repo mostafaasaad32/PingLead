@@ -19,19 +19,19 @@ export const DEFAULT_BUDGET_MS = 4000;
 
 /** What each category means, as the model sees it (the main deliverable decides) */
 export const CATEGORY_DEFINITIONS: Record<CategoryType, string> = {
-  web_mobile_dev: 'writing code: websites, web apps, mobile apps, software, APIs, WordPress development, bug fixes',
+  web_mobile_dev: 'writing code: websites, web apps, mobile apps, software, APIs and integrations (Twilio, CRMs, payment APIs), WordPress development, bug fixes',
   ai_data_automation: 'building AI features/chatbots/agents, automation workflows (n8n, Zapier, Make), data analysis, dashboards, web scraping',
-  ui_ux_graphic: 'graphic design, logos, branding, UI/UX design, social media designs, illustrations, character design, print',
+  ui_ux_graphic: 'graphic design, logos, branding, UI/UX design, social media designs, illustrations and artwork (also for games/cards), character design, print',
   video_audio_motion: 'video editing/montage, motion graphics, animation, reels, voice-over, audio, podcasts (including AI-generated video)',
   digital_marketing_seo: 'marketing, ads campaigns, SEO, social media management, content strategy, PR/press releases',
   writing_translation: 'writing articles/content/copy, translation, proofreading, transcription, scripts',
   business_accounting_legal: 'accounting, bookkeeping, finance, business plans, feasibility studies, legal work',
   sales_customer_support: 'sales, lead generation, customer service, virtual/administrative assistant, data entry, Excel/Word/PDF tasks',
-  engineering_architecture: 'engineering, architecture, interior design, AutoCAD/Revit, mechanical/CAD product design',
+  engineering_architecture: 'engineering, architecture, interior design, AutoCAD/Revit, permits/drawings, mechanical CAD for manufacturing',
   it_cybersecurity_devops: 'servers, hosting, networks, cybersecurity, DevOps, cloud setup',
   ecommerce_stores: 'setting up or managing online stores (Salla, Zid, Shopify, WooCommerce), product listings, dropshipping',
   education_training: 'teaching, tutoring, training courses, academic research and university assignments',
-  game_ar_vr: 'game development, 3D modeling/rendering for games or products, AR/VR',
+  game_ar_vr: 'game development (programming games), 3D modeling/rendering (characters, products, jewelry), AR/VR',
   other: 'none of the above',
 };
 

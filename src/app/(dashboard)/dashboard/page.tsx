@@ -142,6 +142,15 @@ interface TrackedProjectAction {
 
 const DEFAULT_AI_MIN_SCORE = 70;
 
+/** CRM funnel the user moves a project through (saved/ignored are separate actions) */
+type FunnelStatus = "matched" | "applied" | "replied" | "won";
+const FUNNEL_STATUSES: { id: FunnelStatus; label: string; toast: string }[] = [
+  { id: "matched", label: "🎯 لسه متقدمتش", toast: "رجّعت المشروع لـ \"لسه متقدمتش\"" },
+  { id: "applied", label: "📨 قدّمت", toast: "📨 اتسجل إنك قدّمت" },
+  { id: "replied", label: "💬 العميل رد", toast: "💬 اتسجل إن العميل رد" },
+  { id: "won", label: "🏆 كسبته", toast: "🏆 مبروك! اتسجل إنك كسبت المشروع" },
+];
+
 /** AI qualifier badge: score against the user's criteria, reason on hover and on small screens */
 function AiScoreBadge({ action }: { action?: TrackedProjectAction }) {
   if (typeof action?.ai_score !== "number") return null;
@@ -700,6 +709,33 @@ export default function DashboardPage() {
 
   // Unified Save / Un-save toggle
   // Explicitly sets notes: "user_saved" when saving, or un-saves when clicked again
+  const handleSetFunnelStatus = async (leadOrItem: any, status: FunnelStatus) => {
+    const targetId = leadOrItem.project_id || leadOrItem.id;
+    const previous = trackedActions[targetId];
+    setTrackedActions((prev) => ({
+      ...prev,
+      [targetId]: { ...prev[targetId], id: prev[targetId]?.id || targetId, project_id: targetId, status },
+    }));
+    try {
+      const res = await fetch("/api/tracker", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: targetId, status }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || "تعذر حفظ الحالة");
+      showToast(FUNNEL_STATUSES.find((s) => s.id === status)?.toast || "اتحفظت الحالة");
+    } catch (err: any) {
+      setTrackedActions((prev) => {
+        const next = { ...prev };
+        if (previous) next[targetId] = previous;
+        else delete next[targetId];
+        return next;
+      });
+      showToast(err.message || "تعذر حفظ الحالة");
+    }
+  };
+
   const handleToggleSaveLead = async (leadOrItem: any) => {
     const targetId = leadOrItem.project_id || leadOrItem.id;
     const currentAction = getLeadAction(leadOrItem);
@@ -1400,7 +1436,29 @@ export default function DashboardPage() {
                             </a>
                           </div>
 
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {/* Funnel status: feeds reply rate / win rate in the analytics */}
+                            <label className="sr-only" htmlFor={`status-${lead.id}`}>حالة المشروع</label>
+                            <select
+                              id={`status-${lead.id}`}
+                              value={FUNNEL_STATUSES.some((s) => s.id === action?.status) ? action!.status : ""}
+                              onChange={(e) => handleSetFunnelStatus(lead, e.target.value as FunnelStatus)}
+                              className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition bg-white ${
+                                action && action.status !== "matched" && FUNNEL_STATUSES.some((s) => s.id === action.status)
+                                  ? "border-emerald-300 text-emerald-800 bg-emerald-50"
+                                  : "border-slate-200 text-slate-600"
+                              }`}
+                            >
+                              <option value="" disabled>
+                                الحالة…
+                              </option>
+                              {FUNNEL_STATUSES.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.label}
+                                </option>
+                              ))}
+                            </select>
+
                             <button
                               type="button"
                               onClick={() => handleToggleSaveLead(lead)}
