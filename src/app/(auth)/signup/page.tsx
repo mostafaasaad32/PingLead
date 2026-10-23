@@ -517,6 +517,18 @@ function SignUpForm() {
                 )}
               </button>
 
+              <p className="text-[11px] text-slate-500 text-center leading-relaxed">
+                بإنشاء الحساب أنت توافق على{" "}
+                <a href="/terms" target="_blank" className="font-bold text-emerald-700 hover:underline">
+                  شروط الاستخدام
+                </a>{" "}
+                و
+                <a href="/privacy" target="_blank" className="font-bold text-emerald-700 hover:underline">
+                  سياسة الخصوصية
+                </a>
+                .
+              </p>
+
               <div className="pt-2 text-center">
                 <button
                   type="button"

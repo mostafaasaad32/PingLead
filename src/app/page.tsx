@@ -121,9 +121,8 @@ export default function Home() {
         <footer className="mt-16 pt-8 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between text-xs text-gray-500 gap-4">
           <div>© 2026 بينج ليد (PingLead). جميع الحقوق محفوظة.</div>
           <div className="flex items-center gap-6">
-            <span>منصة سحابية متقدمة</span>
-            <span>بيانات فورية وآمنة</span>
-            <span>ذكاء اصطناعي فائق الدقة</span>
+            <Link href="/privacy" className="hover:text-gray-300 transition">سياسة الخصوصية</Link>
+            <Link href="/terms" className="hover:text-gray-300 transition">شروط الاستخدام</Link>
           </div>
         </footer>
       </div>
