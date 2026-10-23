@@ -90,10 +90,11 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
+     * - sw.js (service worker for browser notifications; must load without auth redirects)
      * - auth/callback (OAuth callback handler)
      * - api/cron, api/webhooks (background jobs & webhooks)
      * - public asset extensions: svg, png, jpg, jpeg, gif, webp
      */
-    "/((?!_next/static|_next/image|favicon.ico|auth/callback|api/cron|api/webhooks|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|sw.js|auth/callback|api/cron|api/webhooks|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

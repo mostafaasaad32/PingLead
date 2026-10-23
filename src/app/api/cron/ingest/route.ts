@@ -17,7 +17,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { ingestCategoryPosts } from '@/lib/scrapers';
-import { UnifiedProject, UserFilter } from '@/lib/scrapers/types';
+import { PLATFORMS_METADATA, UnifiedProject, UserFilter } from '@/lib/scrapers/types';
+import { getPushSubscriptions, projectPushPayload, sendPushToSubscriptions } from '@/lib/notifications/web-push';
 import { batchMatchProjects } from '@/lib/matching/filter-matcher';
 import { sendSmartFilterTelegramAlert, dispatchLeadToSubscribers } from '@/lib/telegram/dispatcher';
 import { evaluateProjectForAutoBidding } from '@/lib/auto-bidder/engine';
@@ -263,6 +264,7 @@ export async function GET(req: NextRequest) {
     let matchesFound = 0;
     let actionsCreated = 0;
     let smartTelegramDispatched = 0;
+    let pushDispatched = 0;
 
     if (matchMap.size > 0) {
       const items = Array.from(matchMap.values());
@@ -347,7 +349,8 @@ export async function GET(req: NextRequest) {
         activeFilters
       );
 
-      const alertJobs = newActions
+      // Matches worth notifying about (any channel); Telegram and browser push each take their share
+      const notifyJobs = newActions
         .map((action) => ({ action, ...matchByCandidate.get(`${action.user_id}_${action.project_id}`)! }))
         .filter(({ action, item, match }) => {
           const filter = activeFilters.find((f) => f.id === match.filterId);
@@ -358,8 +361,10 @@ export async function GET(req: NextRequest) {
           // Unscored (AI failed / quota used up) still alerts, so no project is lost.
           const ai = aiByAction.get(action.id);
           if (ai?.result && ai.result.score < (filter?.ai_min_score ?? DEFAULT_AI_MIN_SCORE)) return false;
-          return filter?.notify_telegram && userTelegramMap.has(match.userId);
+          // notify_telegram is the filter's "alerts on" switch for every channel
+          return Boolean(filter?.notify_telegram);
         });
+      const alertJobs = notifyJobs.filter(({ match }) => userTelegramMap.has(match.userId));
 
       const results = await mapWithConcurrency(alertJobs, 10, async ({ action, item, match }) => {
         const project = item.project;
@@ -395,6 +400,28 @@ export async function GET(req: NextRequest) {
         );
       });
       smartTelegramDispatched = results.filter(Boolean).length;
+
+      // 6c-2. Browser notifications (Web Push) for every device the user allowed
+      const pushSubs = await getPushSubscriptions(Array.from(new Set(notifyJobs.map((j) => j.match.userId))));
+      if (pushSubs.size) {
+        const pushResults = await mapWithConcurrency(
+          notifyJobs.filter((j) => pushSubs.has(j.match.userId)),
+          10,
+          ({ action, item, match }) =>
+            sendPushToSubscriptions(
+              pushSubs.get(match.userId)!,
+              projectPushPayload({
+                id: action.project_id,
+                title: item.project.title,
+                url: item.project.url,
+                platformLabel: PLATFORMS_METADATA.find((p) => p.id === item.project.platform)?.label_ar || item.project.platform,
+                budget: item.project.budget,
+                aiScore: aiByAction.get(action.id)?.result?.score ?? null,
+              })
+            )
+        );
+        pushDispatched = pushResults.reduce((n, r) => n + (r || 0), 0);
+      }
 
       // 6d. Auto-Bidding: only projects that are new matches this cycle
       // Awaited: on Vercel un-awaited work can be frozen as soon as the response is sent
@@ -466,6 +493,7 @@ export async function GET(req: NextRequest) {
       matchesFound,
       actionsCreated,
       smartTelegramDispatched,
+      pushDispatched,
       legacyDispatched,
       // Counts only: the scraped projects themselves made the response too large for cron services
       ingestionStats: ingestionStats.map(({ projects, ...stats }) => stats),
