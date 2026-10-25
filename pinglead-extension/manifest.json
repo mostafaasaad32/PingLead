@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "PingLead Copilot - رادار العميل والعروض الذكية",
+  "version": "1.0.0",
+  "description": "تقييم العميل وكشف المخاطر وتوليد عروض رابحة تلقائياً على Upwork و Mostaql و Nafezly",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.upwork.com/*",
+    "*://*.mostaql.com/*",
+    "*://*.nafezly.com/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*",
+    "https://*.vercel.app/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "إعدادات PingLead Copilot"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.upwork.com/*",
+        "*://*.mostaql.com/*",
+        "*://*.nafezly.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

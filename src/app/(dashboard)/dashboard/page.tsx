@@ -50,6 +50,7 @@ import {
 } from "@/lib/insights/competition";
 import { ProjectPricing } from "@/lib/insights/pricing";
 import { getPlatformTheme, PlatformBadge, PlatformLogo } from "@/lib/platform-themes";
+import DashboardFilters from "@/components/dashboard/DashboardFilters";
 
 interface Lead {
   id: string;
@@ -98,7 +99,7 @@ function InsightChips({
   if (competition.level === "unknown" && !clientText && !insights?.duration_text && !suggestion) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 mb-3">
+    <div className="flex flex-wrap items-center gap-1 mb-1.5 mt-1">
       {suggestion && (
         <span
           className="text-[11px] font-bold px-2 py-0.5 rounded-md border bg-violet-50 text-violet-800 border-violet-200/70"
@@ -160,7 +161,7 @@ function ScamWarning({ postText }: { postText: string }) {
   return (
     <div
       role="note"
-      className={`mb-3 flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] ${
+      className={`mb-1.5 flex items-start gap-1 rounded-md border px-2 py-0.5 text-[11px] ${
         high ? "bg-rose-50 text-rose-800 border-rose-200" : "bg-amber-50 text-amber-800 border-amber-200"
       }`}
     >
@@ -182,7 +183,7 @@ function AiScoreBadge({ action }: { action?: TrackedProjectAction }) {
         ? "bg-amber-50 text-amber-800 border-amber-200/70"
         : "bg-rose-50 text-rose-700 border-rose-200/70";
   return (
-    <div className={`mb-3 inline-flex max-w-full items-start gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] ${tone}`}>
+    <div className={`mb-1.5 inline-flex max-w-full items-start gap-1 rounded-md border px-2 py-0.5 text-[11px] ${tone}`}>
       <span className="font-bold whitespace-nowrap">🤖 {score}% توافق</span>
       {action.ai_reason && <span className="opacity-80">· {action.ai_reason}</span>}
     </div>
@@ -438,17 +439,14 @@ function ClientScorePill({ data }: { data: any }) {
           setIsOpen(true);
         }}
         title="انقر هنا لعرض التقرير الكامل لموثوقية العميل، نقاط القوة، التحذيرات، والنصيحة التفاوضية"
-        className={`group px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all flex items-center gap-1.5 cursor-pointer select-none shadow-2xs hover:shadow-md hover:scale-[1.02] active:scale-95 ${styles.bg} ${styles.border} ${styles.text}`}
+        className={`group h-6 px-2 rounded-md text-[11px] font-medium border transition-all flex items-center gap-1 cursor-pointer select-none shadow-2xs hover:shadow-xs active:scale-95 shrink-0 ${styles.bg} ${styles.border} ${styles.text}`}
       >
-        <span className="text-sm shrink-0">{styles.icon}</span>
-        <span className="font-bold">{styles.title}</span>
-        <span className="font-mono font-black px-1.5 py-0.2 rounded-md bg-white/70 dark:bg-black/20 border border-black/5">
+        <span className="shrink-0">{styles.icon}</span>
+        <span>{styles.title}</span>
+        <span className="font-mono font-bold px-1 py-0.2 rounded bg-white/70 dark:bg-black/20 border border-black/5">
           {evaluation.score.toFixed(1)}/10
         </span>
-        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold bg-white/80 dark:bg-black/30 px-1.5 py-0.5 rounded-full border border-black/10 text-slate-700 group-hover:bg-slate-900 group-hover:text-white transition-colors duration-150">
-          <span>فحص العميل</span>
-          <ChevronDown className="w-3 h-3 group-hover:translate-y-0.5 transition-transform" />
-        </span>
+        <ChevronDown className="w-2.5 h-2.5 opacity-60 group-hover:translate-y-0.5 transition-transform" />
       </button>
 
       {/* Full Centered Dialog Modal - Immune to clipping & overflow-hidden */}
@@ -974,7 +972,7 @@ export default function DashboardPage() {
   const proposalsCount = trackerItems.filter((a) => Boolean(a.generated_proposal)).length;
 
   return (
-    <div className="space-y-6" dir="rtl">
+    <div className="w-full space-y-6" dir="rtl">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 left-6 z-50 p-4 rounded-2xl bg-slate-900 text-white text-xs font-bold shadow-2xl flex items-center gap-3 border border-emerald-500/30 animate-in fade-in slide-in-from-bottom-3 duration-200">
@@ -985,9 +983,9 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Vollna Master Sub-Tabs Header: Clean 3 Tabs */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-slate-200">
-        <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto">
+      {/* Vollna Master Sub-Tabs Header: Segmented Compact Tabs */}
+      <div className="w-full flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 pb-2 border-b border-slate-200/80">
+        <div className="inline-flex items-center bg-slate-100/80 p-0.5 rounded-lg border border-slate-200/60 overflow-x-auto">
           {[
             { id: "live_overview", label: "الرادار المباشر", count: totalLeads },
             { id: "saved_jobs", label: "المشاريع المحفوظة", count: savedCount },
@@ -996,19 +994,19 @@ export default function DashboardPage() {
             <button
               key={tab.id}
               onClick={() => setCurrentTab(tab.id as DashboardSubTab)}
-              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+              className={`h-7 px-3 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
                 currentTab === tab.id
-                  ? "bg-slate-900 text-white shadow-xs"
-                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                  ? "bg-white text-slate-900 shadow-xs font-semibold"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
               <span>{tab.label}</span>
               {tab.count !== undefined && (
                 <span
-                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                  className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold transition-colors ${
                     currentTab === tab.id
-                      ? "bg-emerald-500 text-black"
-                      : "bg-slate-200 text-slate-700"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-slate-200/70 text-slate-600"
                   }`}
                 >
                   {tab.count}
@@ -1018,8 +1016,8 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* Right side: Last sync & Refresh button & Export */}
-        <div className="flex items-center gap-2.5 text-xs text-slate-500 self-start sm:self-auto">
+        {/* Action Controls: Last sync, Refresh button & Export (Compact h-8) */}
+        <div className="flex items-center gap-2 text-xs text-slate-500 self-start sm:self-auto shrink-0">
           <span className="hidden md:inline text-[11px] text-slate-400">
             آخر سحب: {lastSyncTime.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}
           </span>
@@ -1029,7 +1027,7 @@ export default function DashboardPage() {
             onClick={handleScanNow}
             disabled={scanning}
             title="سحب فوري لجميع المنصات التسع الآن"
-            className="p-2 sm:px-3 sm:py-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold flex items-center gap-1.5 transition text-xs disabled:opacity-50"
+            className="h-8 px-3 text-xs font-medium rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1.5 transition shadow-2xs disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${scanning ? "animate-spin" : ""}`} />
             <span className="hidden sm:inline">{scanning ? "جاري السحب..." : "تحديث الرادار"}</span>
@@ -1039,7 +1037,7 @@ export default function DashboardPage() {
             type="button"
             onClick={handleExportCSV}
             title="تصدير النتائج كملف CSV يدعم اللغة العربية"
-            className="p-2 sm:px-3 sm:py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold flex items-center gap-1.5 transition text-xs shadow-xs"
+            className="h-8 px-3 text-xs font-medium rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
           >
             <Download className="w-3.5 h-3.5 text-slate-600" />
             <span className="hidden sm:inline">تصدير CSV</span>
@@ -1075,128 +1073,36 @@ export default function DashboardPage() {
         </div>
       ) : (
         /* Render Overview or Saved Jobs */
-        <div className="space-y-4">
-          {/* Search, Categories, Platforms & Time Window Filter Bar */}
-          <div className="vollna-card p-4 bg-white border border-slate-200 rounded-2xl shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
-            <div className="relative w-full md:w-72">
-              <input
-                type="text"
-                placeholder="بحث في نصوص وعناوين المشاريع..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-3 pr-9 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-emerald-600"
-              />
-              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
-            </div>
-
-            <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto flex-wrap">
-              {/* Category Selector - 14 Categories */}
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-emerald-600 font-bold"
-              >
-                <option value="all">كافة التخصصات (14 تخصصاً)</option>
-                {CATEGORIES_METADATA.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.icon} {c.label_ar}
-                  </option>
-                ))}
-              </select>
-
-              {/* Platform Selector - 9 Core Platforms */}
-              <select
-                value={selectedPlatform}
-                onChange={(e) => setSelectedPlatform(e.target.value)}
-                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-emerald-600 font-bold"
-              >
-                <option value="all">كافة المنصات (9 منصات)</option>
-                <optgroup label="🇪🇬🇸🇦 منصات عربية (5)">
-                  {PLATFORMS_METADATA.filter((p) => p.region === "arab").map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label_ar}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="🌍 منصات عالمية (4)">
-                  {PLATFORMS_METADATA.filter((p) => p.region === "global").map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label_ar}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
-
-              {/* Time Window Filter (Default: Last 24 Hours, options up to 48h / 72h) */}
-              <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200">
-                <span className="text-[11px] font-bold text-slate-500 px-2 flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>النافذة:</span>
-                </span>
-                {[
-                  { id: "24h", label: "آخر 24 ساعة (افتراضي)" },
-                  { id: "48h", label: "آخر 48 ساعة" },
-                  { id: "72h", label: "آخر 72 ساعة" },
-                ].map((w) => (
-                  <button
-                    key={w.id}
-                    type="button"
-                    onClick={() => setTimeWindow(w.id as any)}
-                    className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition ${
-                      timeWindow === w.id
-                        ? "bg-slate-900 text-white shadow-xs"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    {w.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Hide Risky Clients Quick Filter */}
-              <button
-                type="button"
-                onClick={() => setHideRiskyClients((v) => !v)}
-                aria-pressed={hideRiskyClients}
-                title="إخفاء كل المشاريع ذات التقييم الأقل من 6/10 والتركيز على أصحاب المشاريع الجادين فقط"
-                className={`px-3 py-1.5 text-[11px] font-bold rounded-xl border transition flex items-center gap-1.5 ${
-                  hideRiskyClients
-                    ? "bg-slate-900 border-slate-900 text-white shadow-xs"
-                    : "bg-white border-slate-200 text-slate-700 hover:border-slate-300"
-                }`}
-              >
-                <span>🛡️</span>
-                <span>إخفاء العملاء الوهميين (أعلى من 6/10 فقط)</span>
-              </button>
-
-              {hasAiScores && (
-                <button
-                  type="button"
-                  onClick={() => setOnlyAiFit((v) => !v)}
-                  aria-pressed={onlyAiFit}
-                  title="المشاريع اللي الـ AI قيّمها فوق الحد اللي اخترته في الفلتر"
-                  className={`px-3 py-1.5 text-[11px] font-bold rounded-xl border transition ${
-                    onlyAiFit
-                      ? "bg-emerald-600 border-emerald-600 text-white shadow-xs"
-                      : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
-                  }`}
-                >
-                  🤖 المناسب لشروطي بس
-                </button>
-              )}
-            </div>
-          </div>
+        <div className="w-full space-y-4">
+          {/* Full-Width Vollna CSS Grid Filters Workspace */}
+          <DashboardFilters
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            selectedCategory={selectedCategory}
+            setSelectedCategory={setSelectedCategory}
+            selectedPlatform={selectedPlatform}
+            setSelectedPlatform={setSelectedPlatform}
+            timeWindow={timeWindow}
+            setTimeWindow={setTimeWindow}
+            hideRiskyClients={hideRiskyClients}
+            setHideRiskyClients={setHideRiskyClients}
+            hasAiScores={hasAiScores}
+            onlyAiFit={onlyAiFit}
+            setOnlyAiFit={setOnlyAiFit}
+            totalCount={currentTab === "live_overview" ? filteredLiveLeads.length : filteredSavedJobs.length}
+          />
 
           {/* Cards Feed */}
           {(currentTab === "live_overview" ? leadsLoading : trackerLoading) ? (
-            <div className="vollna-card p-12 text-center bg-white border border-slate-200 rounded-2xl">
-              <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-xs text-slate-500">جاري تحميل البيانات من Supabase...</p>
+            <div className="w-full min-h-[600px] flex flex-col items-center justify-center p-12 text-center bg-white border border-slate-200 rounded-xl shadow-sm">
+              <div className="w-10 h-10 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mb-4" />
+              <p className="text-sm font-bold text-slate-800">جاري تحميل البيانات من Supabase...</p>
+              <p className="text-xs text-slate-400 mt-1.5">يتم فحص وتحديث الرادار المباشر من 9 منصات</p>
             </div>
           ) : currentTab === "saved_jobs" ? (
             /* Saved Jobs list */
             filteredSavedJobs.length === 0 ? (
-              <div className="vollna-card p-12 text-center bg-white border border-slate-200 rounded-2xl shadow-xs">
+              <div className="w-full min-h-[400px] flex flex-col items-center justify-center p-12 text-center bg-white border border-slate-200 rounded-xl shadow-sm">
                 <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-3 border border-amber-200/60">
                   <Bookmark className="w-6 h-6" />
                 </div>
@@ -1206,78 +1112,84 @@ export default function DashboardPage() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-2.5">
                 {filteredSavedJobs.map((item) => {
                   const dateInfo = formatLeadDate(item.published_at || item.tracked_at || "");
                   const theme = getPlatformTheme(item.platform);
+                  const isTitleEn = isEnglishText(item.title);
+                  const isDescEn = isEnglishText(item.description);
 
                   return (
                     <div
                       key={item.id}
-                      className={`relative bg-white border rounded-2xl shadow-xs transition-all duration-200 ${theme.cardBorder} ${theme.cardHoverBorder} hover:shadow-lg ${theme.cardGlow}`}
+                      className={`relative bg-white border border-slate-200/90 hover:border-slate-300 rounded-xl shadow-2xs transition-all duration-150 ${theme.cardGlow}`}
                     >
                       {/* Top Brand Accent Stripe */}
-                      <div className={`h-1.5 w-full rounded-t-2xl bg-gradient-to-r ${theme.topStripeGradient}`} />
+                      <div className={`h-1 w-full rounded-t-xl bg-gradient-to-r ${theme.topStripeGradient}`} />
 
-                      <div className="p-5 sm:p-6">
+                      <div className="p-3.5 sm:p-4">
                         {/* Top Row: Platform Badge with Logo, Budget, Date, and Bookmark */}
-                        <div className="flex items-center justify-between gap-3 mb-3">
-                          <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <PlatformBadge platform={item.platform} />
 
                             <ClientScorePill data={item} />
 
                             {item.budget && (
-                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60 font-mono">
+                              <span className="h-6 px-2 text-[11px] rounded-md font-medium bg-emerald-50 text-emerald-800 border border-emerald-200/60 font-mono inline-flex items-center">
                                 <bdi dir="ltr">{item.budget}</bdi>
                               </span>
                             )}
 
-                            <span className="text-[11px] text-slate-400 flex items-center gap-1" title={dateInfo.exact}>
-                              <Clock className="w-3 h-3" />
+                            <span className="h-6 px-2 text-[11px] rounded-md font-medium text-slate-500 bg-slate-50 border border-slate-200/60 inline-flex items-center gap-1" title={dateInfo.exact}>
+                              <Clock className="w-3 h-3 text-slate-400" />
                               <span>{dateInfo.relative}</span>
                             </span>
 
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/60 flex items-center gap-1">
+                            <span className="h-6 px-2 text-[10px] rounded-md font-medium bg-amber-50 text-amber-800 border border-amber-200/60 inline-flex items-center gap-1">
                               <span>📌</span>
                               <span>محفوظ</span>
                             </span>
                           </div>
 
-                          {/* Bookmark Toggle (Click to Unsave) */}
+                          {/* Bookmark Toggle (Click to Unsave) - w-7 h-7 */}
                           <button
                             type="button"
                             onClick={() => handleToggleSaveLead(item)}
                             title="إلغاء حفظ هذا المشروع"
-                            className="p-1.5 rounded-lg border bg-amber-50 border-amber-200 text-amber-600 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition"
+                            className="w-7 h-7 rounded-lg border bg-amber-50 border-amber-200 text-amber-600 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition flex items-center justify-center shrink-0 cursor-pointer"
                           >
-                            <BookmarkCheck className="w-4 h-4" />
+                            <BookmarkCheck className="w-3.5 h-3.5" />
                           </button>
                         </div>
 
-                        {/* Title */}
-                        <h2 className="text-base font-bold text-slate-900 mb-2 leading-snug">
-                          <a
-                            href={item.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className={`transition-colors duration-150 ${theme.titleHover}`}
-                          >
-                            {item.title || "مشروع عمل حر"}
-                          </a>
-                        </h2>
+                        {/* Title with natural English/Arabic direction */}
+                        <div dir={isTitleEn ? "ltr" : "rtl"} className={isTitleEn ? "text-left" : "text-right"}>
+                          <h2 className="text-[15px] font-semibold text-slate-900 leading-snug">
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className={`transition-colors duration-150 ${theme.titleHover}`}
+                            >
+                              {item.title || "مشروع عمل حر"}
+                            </a>
+                          </h2>
+                        </div>
 
-                        {/* Description Snippet */}
+                        {/* Description Snippet (2 lines max, natural text direction) */}
                         {item.description && (
-                          <p className="text-xs text-slate-600 leading-relaxed line-clamp-3 mb-3 whitespace-pre-line">
-                            {item.description}
-                          </p>
+                          <div dir={isDescEn ? "ltr" : "rtl"} className={isDescEn ? "text-left" : "text-right"}>
+                            <p className="line-clamp-2 text-xs text-slate-600 leading-relaxed mt-1 whitespace-pre-line">
+                              {item.description}
+                            </p>
+                          </div>
                         )}
 
                         {/* Generated Proposal Accordion / Box if present */}
                         {item.generated_proposal && (
-                          <div className="my-3.5 p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                            <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-slate-200/60">
+                          <div className="my-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                            <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-slate-200/60">
                               <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
                                 <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
                                 <span>العرض الذكي المُولد بالذكاء الاصطناعي</span>
@@ -1285,7 +1197,7 @@ export default function DashboardPage() {
                               <button
                                 type="button"
                                 onClick={() => handleCopyItemProposal(item.id, item.generated_proposal!)}
-                                className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-[11px] flex items-center gap-1 transition shadow-2xs"
+                                className="h-6 px-2 rounded-md bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium text-[11px] flex items-center gap-1 transition shadow-2xs"
                               >
                                 {copiedProposalId === item.id ? (
                                   <>
@@ -1307,27 +1219,25 @@ export default function DashboardPage() {
                         )}
 
                         {/* Bottom Actions Row */}
-                        <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <a
-                              href={item.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className={`py-2 px-3.5 rounded-xl border font-bold text-xs flex items-center gap-1.5 transition shadow-2xs ${theme.openBtnClass}`}
-                            >
-                              <PlatformLogo platform={theme.id} size={14} className="shrink-0" />
-                              <span>فتح المشروع في {theme.nameAr}</span>
-                              <ExternalLink className="w-3 h-3 opacity-60" />
-                            </a>
+                        <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`h-8 px-3 rounded-lg border font-medium text-xs flex items-center gap-1.5 transition shadow-2xs ${theme.openBtnClass}`}
+                          >
+                            <PlatformLogo platform={theme.id} size={13} className="shrink-0" />
+                            <span>فتح المشروع في {theme.nameAr}</span>
+                            <ExternalLink className="w-3 h-3 opacity-60" />
+                          </a>
 
-                            <button
-                              type="button"
-                              onClick={() => handleToggleSaveLead(item)}
-                              className="py-2 px-3 rounded-xl border border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-600 font-bold text-xs transition"
-                            >
-                              إلغاء الحفظ
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSaveLead(item)}
+                            className="h-7 px-2.5 rounded-md border border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-600 font-medium text-xs transition cursor-pointer"
+                          >
+                            إلغاء الحفظ
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -1338,108 +1248,118 @@ export default function DashboardPage() {
           ) : (
             /* Live Overview Cards Feed (Filtered Leads) */
             filteredLiveLeads.length === 0 ? (
-              <div className="vollna-card p-12 text-center bg-white border border-slate-200 rounded-2xl shadow-xs">
-                <p className="text-sm font-bold text-slate-700">لا توجد مشاريع تطابق هذه التصفية حالياً.</p>
-                <p className="text-xs text-slate-400 mt-1">جرّب توسيع النافذة الزمنية إلى "آخر 48 ساعة" أو اختيار "كافة المنصات".</p>
+              <div className="w-full min-h-[400px] flex flex-col items-center justify-center p-12 text-center bg-white border border-slate-200 rounded-xl shadow-sm">
+                <div className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center mx-auto mb-3 border border-slate-200">
+                  <Search className="w-6 h-6 text-slate-400" />
+                </div>
+                <p className="text-sm font-bold text-slate-800">لا توجد مشاريع تطابق هذه التصفية حالياً.</p>
+                <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
+                  جرّب توسيع النافذة الزمنية إلى "آخر 48 ساعة" أو اختيار "كافة المنصات" لعرض المزيد.
+                </p>
               </div>
             ) : (
-              <div className="space-y-3.5">
+              <div className="space-y-2.5">
                 {filteredLiveLeads.map((lead) => {
                   const dateInfo = formatLeadDate(lead.published_at);
                   const budgetBadge = extractBudgetBadge(lead.post_text);
                   const firstLine = extractTitleFromPostText(lead.post_text);
+                  const detailsText = extractDetailsFromPostText(lead.post_text);
                   const action = getLeadAction(lead);
                   const isSaved = action?.status === "saved" && action?.notes === "user_saved";
                   const theme = getPlatformTheme(lead.platform);
+                  const isTitleEn = isEnglishText(firstLine);
+                  const isDescEn = isEnglishText(detailsText);
 
                   return (
                     <div
                       key={lead.id}
-                      className={`relative bg-white border rounded-2xl shadow-xs transition-all duration-200 ${theme.cardBorder} ${theme.cardHoverBorder} hover:shadow-lg ${theme.cardGlow}`}
+                      className={`relative bg-white border border-slate-200/90 hover:border-slate-300 rounded-xl shadow-2xs transition-all duration-150 ${theme.cardGlow}`}
                     >
                       {/* Top Brand Accent Stripe */}
-                      <div className={`h-1.5 w-full rounded-t-2xl bg-gradient-to-r ${theme.topStripeGradient}`} />
+                      <div className={`h-1 w-full rounded-t-xl bg-gradient-to-r ${theme.topStripeGradient}`} />
 
-                      <div className="p-5 sm:p-6">
+                      <div className="p-3.5 sm:p-4">
                         {/* Top Row: Platform Badge with Logo, Time, Budget, and Save Bookmark Icon */}
-                        <div className="flex items-center justify-between gap-3 mb-3">
-                          <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <PlatformBadge platform={lead.platform} />
 
                             <ClientScorePill data={lead} />
 
                             {budgetBadge && (
-                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200/60 font-mono">
+                              <span className="h-6 px-2 text-[11px] rounded-md font-medium bg-emerald-50 text-emerald-800 border border-emerald-200/60 font-mono inline-flex items-center">
                                 <bdi dir="ltr">{budgetBadge}</bdi>
                                 {lead.pricing?.budgetEgpText && (
                                   <span className="font-semibold text-emerald-700/80">
                                     {" · "}
-                                    {/* isolated so the RTL page doesn't flip the range to "136,000 - 54,400" */}
                                     <bdi dir="ltr">{lead.pricing.budgetEgpText}</bdi>
                                   </span>
                                 )}
                               </span>
                             )}
 
-                            <span className="text-[11px] text-slate-400 flex items-center gap-1" title={dateInfo.exact}>
-                              <Clock className="w-3 h-3" />
+                            <span className="h-6 px-2 text-[11px] rounded-md font-medium text-slate-500 bg-slate-50 border border-slate-200/60 inline-flex items-center gap-1" title={dateInfo.exact}>
+                              <Clock className="w-3 h-3 text-slate-400" />
                               <span>{dateInfo.relative}</span>
                             </span>
 
                             {isSaved && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200/60 flex items-center gap-1">
+                              <span className="h-6 px-2 text-[10px] rounded-md font-medium bg-amber-50 text-amber-800 border border-amber-200/60 inline-flex items-center gap-1">
                                 <span>📌</span>
                                 <span>محفوظ</span>
                               </span>
                             )}
                           </div>
 
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleToggleSaveLead(lead)}
-                              title={isSaved ? "إلغاء الحفظ من المفضلة" : "حفظ المشروع في المشاريع المحفوظة"}
-                              className={`p-1.5 rounded-lg border transition ${
-                                isSaved
-                                  ? "bg-amber-50 border-amber-200 text-amber-600 shadow-2xs"
-                                  : "border-slate-200 text-slate-400 hover:text-slate-700 hover:bg-slate-50"
-                              }`}
-                            >
-                              {isSaved ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
-                            </button>
-                          </div>
+                          {/* Bookmark Toggle (w-7 h-7) */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSaveLead(lead)}
+                            title={isSaved ? "إلغاء الحفظ من المفضلة" : "حفظ المشروع في المشاريع المحفوظة"}
+                            className={`w-7 h-7 rounded-lg border flex items-center justify-center transition shrink-0 cursor-pointer ${
+                              isSaved
+                                ? "bg-amber-50 border-amber-200 text-amber-600 shadow-2xs"
+                                : "border-slate-200 text-slate-400 hover:text-slate-700 hover:bg-slate-50"
+                            }`}
+                          >
+                            {isSaved ? <BookmarkCheck className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
+                          </button>
                         </div>
 
-                        {/* Project Title with platform hover color */}
-                        <h2 className="text-base font-bold text-slate-900 mb-2 leading-snug">
-                          <a
-                            href={lead.post_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className={`transition-colors duration-150 ${theme.titleHover} inline-flex items-center gap-1.5`}
-                          >
-                            <span>{firstLine || "مشروع عمل حر جديد"}</span>
-                          </a>
-                        </h2>
+                        {/* Project Title with platform hover color & natural LTR/RTL support */}
+                        <div dir={isTitleEn ? "ltr" : "rtl"} className={isTitleEn ? "text-left" : "text-right"}>
+                          <h2 className="text-[15px] font-semibold text-slate-900 leading-snug">
+                            <a
+                              href={lead.post_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className={`transition-colors duration-150 ${theme.titleHover} inline-flex items-center gap-1.5`}
+                            >
+                              <span>{firstLine || "مشروع عمل حر جديد"}</span>
+                            </a>
+                          </h2>
+                        </div>
 
                         <InsightChips insights={lead.insights} pricing={lead.pricing} />
-
                         <ScamWarning postText={lead.post_text} />
-
                         <AiScoreBadge action={action} />
 
-                        {/* Project Description Snippet */}
-                        <p className="text-xs text-slate-600 leading-relaxed line-clamp-3 mb-4 whitespace-pre-line">
-                          {extractDetailsFromPostText(lead.post_text)}
-                        </p>
+                        {/* Project Description Snippet (2 lines max, natural text direction) */}
+                        {detailsText && (
+                          <div dir={isDescEn ? "ltr" : "rtl"} className={isDescEn ? "text-left" : "text-right"}>
+                            <p className="line-clamp-2 text-xs text-slate-600 leading-relaxed mt-1 whitespace-pre-line">
+                              {detailsText}
+                            </p>
+                          </div>
+                        )}
 
-                        {/* Bottom Actions Row */}
-                        <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        {/* Bottom Actions Row: Compact h-8 and no duplicate save button */}
+                        <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                           <div className="flex items-center gap-2 flex-wrap">
                             <button
                               type="button"
                               onClick={() => handleOpenProposalModal(lead)}
-                              className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition"
+                              className="h-8 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs shadow-2xs flex items-center gap-1.5 transition cursor-pointer"
                             >
                               <Sparkles className="w-3.5 h-3.5" />
                               <span>توليد عرض ذكي</span>
@@ -1449,25 +1369,25 @@ export default function DashboardPage() {
                               href={lead.post_url}
                               target="_blank"
                               rel="noreferrer"
-                              className={`py-2 px-3.5 rounded-xl border font-bold text-xs flex items-center gap-1.5 transition shadow-2xs ${theme.openBtnClass}`}
+                              className={`h-8 px-3 rounded-lg border font-medium text-xs flex items-center gap-1.5 transition shadow-2xs ${theme.openBtnClass}`}
                             >
-                              <PlatformLogo platform={theme.id} size={14} className="shrink-0" />
+                              <PlatformLogo platform={theme.id} size={13} className="shrink-0" />
                               <span>فتح المشروع في {theme.nameAr}</span>
                               <ExternalLink className="w-3 h-3 opacity-60" />
                             </a>
                           </div>
 
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {/* Funnel status: feeds reply rate / win rate in the analytics */}
+                          <div className="flex items-center gap-2">
+                            {/* Funnel status dropdown next to actions: h-7 text-xs */}
                             <label className="sr-only" htmlFor={`status-${lead.id}`}>حالة المشروع</label>
                             <select
                               id={`status-${lead.id}`}
                               value={FUNNEL_STATUSES.some((s) => s.id === action?.status) ? action!.status : ""}
                               onChange={(e) => handleSetFunnelStatus(lead, e.target.value as FunnelStatus)}
-                              className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition bg-white ${
+                              className={`h-7 px-2 rounded-md text-xs font-medium border transition bg-white cursor-pointer ${
                                 action && action.status !== "matched" && FUNNEL_STATUSES.some((s) => s.id === action.status)
                                   ? "border-emerald-300 text-emerald-800 bg-emerald-50"
-                                  : "border-slate-200 text-slate-600"
+                                  : "border-slate-200 text-slate-600 hover:border-slate-300"
                               }`}
                             >
                               <option value="" disabled>
@@ -1479,19 +1399,6 @@ export default function DashboardPage() {
                                 </option>
                               ))}
                             </select>
-
-                            <button
-                              type="button"
-                              onClick={() => handleToggleSaveLead(lead)}
-                              className={`py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                                isSaved
-                                  ? "bg-amber-50 text-amber-700 border border-amber-200"
-                                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-50 border border-transparent"
-                              }`}
-                            >
-                              {isSaved ? <BookmarkCheck className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
-                              <span>{isSaved ? "محفوظ في قائمتك" : "حفظ المشروع"}</span>
-                            </button>
                           </div>
                         </div>
                       </div>
@@ -1616,3 +1523,12 @@ function isCategoryMatch(itemCategory?: string | null, targetCategory?: string):
   const valid = aliases[targetCategory] || [targetCategory];
   return valid.includes(itemCategory);
 }
+
+// Text language detection for natural LTR/RTL reading
+function isEnglishText(text?: string | null): boolean {
+  if (!text) return false;
+  const arabicChars = (text.match(/[\u0600-\u06FF]/g) || []).length;
+  const latinChars = (text.match(/[a-zA-Z]/g) || []).length;
+  return latinChars > arabicChars;
+}
+

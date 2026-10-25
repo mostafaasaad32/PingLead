@@ -9,6 +9,7 @@ import { UnifiedProject, createUnifiedProject, ProjectCategory, ProjectInsights 
 import { parseArabicRelativeDate } from './utils';
 import { classifyProjectCategory } from '../filters/categorizer';
 import { calculateClientScore } from '../scoring/client-scorer';
+import { fetchFromScrapling, mapScraplingJobsToUnified } from './scrapling-bridge';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
 
@@ -74,7 +75,11 @@ export async function scrapeMostaqlCategory(
     }
 
     if (!res.ok) {
-      console.warn(`[Mostaql Scraper] returned HTTP ${res.status}`);
+      console.warn(`[Mostaql Scraper] returned HTTP ${res.status}. Falling back to Scrapling sidecar...`);
+      const sidecarJobs = await fetchFromScrapling('mostaql', { category: mostaqlCategory, limit });
+      if (sidecarJobs && sidecarJobs.length > 0) {
+        return mapScraplingJobsToUnified(sidecarJobs, 'mostaql');
+      }
       return [];
     }
 
@@ -180,7 +185,35 @@ export async function fetchMostaqlProjectDetails(
         'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8',
       },
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`[Mostaql Details] HTTP ${res.status}. Falling back to Scrapling sidecar...`);
+      const sidecarJobs = await fetchFromScrapling('mostaql', { url: projectUrl });
+      if (sidecarJobs && sidecarJobs[0]) {
+        const sj = sidecarJobs[0];
+        return {
+          description: sj.description,
+          budget_min: sj.budget_min,
+          budget_max: sj.budget_max,
+          duration_text: sj.duration_text,
+          client_hire_rate: sj.client_hire_rate,
+          client_open_projects: sj.client_open_projects,
+          client_in_progress: sj.client_in_progress,
+          client_registered_at: sj.client_registered_at,
+          payment_verified: sj.payment_verified ?? false,
+          client_evaluation: calculateClientScore({
+            platform: 'mostaql',
+            client_hire_rate: sj.client_hire_rate,
+            client_open_projects: sj.client_open_projects,
+            client_in_progress: sj.client_in_progress,
+            client_registered_at: sj.client_registered_at,
+            payment_verified: sj.payment_verified,
+            description: sj.description,
+          }),
+          details_fetched_at: new Date().toISOString(),
+        };
+      }
+      return null;
+    }
     const html = await res.text();
 
     const descMatch = html.match(

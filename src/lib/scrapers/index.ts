@@ -20,6 +20,9 @@ import { scrapeFreelancerCategory } from './freelancer';
 import { scrapeRemoteOkCategory } from './remoteok';
 import { scrapePphCategory } from './pph';
 import { scrapeWwrCategory } from './wwr';
+import { scrapeUpworkCategory } from './upwork';
+import { scrapeRedditCategory } from './reddit';
+import { fetchFromScrapling, isScraplingHealthy } from './scrapling-bridge';
 
 import { supabaseAdmin } from '../supabase/admin';
 
@@ -34,6 +37,9 @@ export * from './freelancer';
 export * from './remoteok';
 export * from './pph';
 export * from './wwr';
+export * from './upwork';
+export * from './reddit';
+export * from './scrapling-bridge';
 
 const BUDGET_KEYS = ['budget', 'budget_min', 'budget_max', 'currency', 'budget_usd_estimate'] as const;
 
@@ -204,13 +210,15 @@ export async function scrapeAllPlatforms(
     );
   }
 
-  // 2. Global Platforms (4)
+  // 2. Global Platforms (Upwork + Freelancer + RemoteOK + WWR + PPH + Reddit)
   if (batch === 'all' || batch === 'global') {
     promises.push(
+      scrapeUpworkCategory(categorySlug, everything ? 30 : 20),
       scrapeFreelancerCategory(categorySlug, everything ? 50 : 20),
       scrapeRemoteOkCategory(categorySlug, everything ? 30 : 20),
       scrapeWwrCategory(categorySlug, everything ? 30 : 20),
-      scrapePphCategory(categorySlug, 20)
+      scrapePphCategory(categorySlug, 20),
+      scrapeRedditCategory(categorySlug, everything ? 30 : 20)
     );
   }
 

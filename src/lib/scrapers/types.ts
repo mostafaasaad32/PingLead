@@ -23,7 +23,8 @@ export type GlobalPlatform =
   | 'freelancer'
   | 'remoteok'
   | 'pph'
-  | 'wwr';
+  | 'wwr'
+  | 'upwork';
 
 export type FreelancePlatform = ArabPlatform | GlobalPlatform;
 
@@ -182,6 +183,17 @@ export const PLATFORMS_METADATA: PlatformMetadata[] = [
     region: 'global',
     icon_letter: 'W',
     website_url: 'https://weworkremotely.com',
+  },
+  {
+    id: 'upwork',
+    label_ar: 'أب وورك (Upwork)',
+    label_en: 'Upwork',
+    badge_color: 'bg-emerald-600',
+    text_color: 'text-white',
+    border_color: 'border-emerald-700',
+    region: 'global',
+    icon_letter: 'Up',
+    website_url: 'https://www.upwork.com',
   },
 ];
 
@@ -356,6 +368,7 @@ export interface ProjectInsights {
   /** Fixed-price or hourly. Used for matching only (not stored). */
   job_type?: 'fixed' | 'hourly' | null;
   payment_verified?: boolean | null;
+  total_spent?: string | null;
   client_rating?: number | null;
   client_evaluation?: ClientEvaluation | null;
 }

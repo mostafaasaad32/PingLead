@@ -418,7 +418,7 @@ export default function InsightsPage() {
                 <section className="vollna-card bg-white border border-slate-200 rounded-2xl overflow-hidden">
                   <div className="p-5 sm:p-6 pb-3">
                     <h2 className="text-sm font-black text-slate-900">نتايج قوالب A/B</h2>
-                    <p className="text-[11px] text-slate-500 mt-0.5">من طابور الـ Auto-Bidding: العروض اللي قدّمتها بكل قالب، وكام منها جاله رد</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">العروض التي قدّمتها بمختلف القوالب، ونسبة الرد على كل قالب</p>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs min-w-[420px]">

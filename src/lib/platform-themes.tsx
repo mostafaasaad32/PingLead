@@ -203,6 +203,46 @@ export const PLATFORM_THEMES: Record<string, PlatformThemeConfig> = {
     openBtnClass: "hover:bg-red-50 hover:text-red-700 hover:border-red-300 text-slate-700 border-slate-200",
     logoBg: "bg-[#dc2626]",
   },
+  upwork: {
+    id: "upwork",
+    nameAr: "أب وورك",
+    nameEn: "Upwork",
+    domain: "upwork.com",
+    region: "global",
+    tagline: "أكبر منصة عمل حر للمحترفين دولياً",
+    brandHex: "#14a800",
+    topStripeGradient: "from-emerald-600 via-green-500 to-teal-600",
+    cardBorder: "border-emerald-100/90",
+    cardHoverBorder: "hover:border-emerald-400",
+    cardGlow: "hover:shadow-emerald-100/70",
+    badgeBg: "bg-emerald-50 text-emerald-950",
+    badgeText: "text-emerald-900",
+    badgeBorder: "border-emerald-200/80",
+    badgeDomainBg: "bg-emerald-100 text-emerald-700",
+    titleHover: "hover:text-emerald-700",
+    openBtnClass: "hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 text-slate-700 border-slate-200",
+    logoBg: "bg-[#14a800]",
+  },
+  reddit: {
+    id: "reddit",
+    nameAr: "ريديت",
+    nameEn: "Reddit",
+    domain: "reddit.com",
+    region: "global",
+    tagline: "مجتمعات التوظيف والعمل الحر",
+    brandHex: "#ff4500",
+    topStripeGradient: "from-orange-600 via-red-500 to-orange-700",
+    cardBorder: "border-orange-100/90",
+    cardHoverBorder: "hover:border-orange-400",
+    cardGlow: "hover:shadow-orange-100/70",
+    badgeBg: "bg-orange-50 text-orange-950",
+    badgeText: "text-orange-900",
+    badgeBorder: "border-orange-200/80",
+    badgeDomainBg: "bg-orange-100 text-orange-700",
+    titleHover: "hover:text-orange-700",
+    openBtnClass: "hover:bg-orange-50 hover:text-orange-700 hover:border-orange-300 text-slate-700 border-slate-200",
+    logoBg: "bg-[#ff4500]",
+  },
   default: {
     id: "default",
     nameAr: "منصة عمل حر",
@@ -520,14 +560,14 @@ export function PlatformBadge({
 
   return (
     <div
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-2xs font-bold text-[11px] transition-all ${theme.badgeBg} ${theme.badgeBorder} ${className}`}
+      className={`inline-flex items-center gap-1.5 h-6 px-2 rounded-md border shadow-2xs font-medium text-[11px] transition-all ${theme.badgeBg} ${theme.badgeBorder} ${className}`}
       title={`${theme.nameAr} (${theme.nameEn}) - ${theme.tagline}`}
     >
-      <PlatformLogo platform={theme.id} size={15} className="shrink-0 drop-shadow-xs" />
+      <PlatformLogo platform={theme.id} size={13} className="shrink-0 drop-shadow-xs" />
       <span className={theme.badgeText}>{theme.nameAr}</span>
       {showDomain && (
         <span
-          className={`text-[9.5px] font-mono px-1.5 py-0.2 rounded-full ${theme.badgeDomainBg} opacity-90`}
+          className={`text-[9.5px] font-mono px-1 py-0.2 rounded ${theme.badgeDomainBg} opacity-90`}
           dir="ltr"
         >
           {theme.domain}

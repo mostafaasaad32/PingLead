@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>إعدادات PingLead Copilot</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    .header {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      color: white;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 800;
+    }
+    .header p {
+      margin: 2px 0 0;
+      font-size: 11px;
+      opacity: 0.9;
+    }
+    .content {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    label {
+      font-size: 12px;
+      font-weight: 700;
+      color: #334155;
+    }
+    input {
+      padding: 9px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 12px;
+      background: white;
+      color: #0f172a;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus {
+      border-color: #10b981;
+      box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+    }
+    .btn-save {
+      background: #10b981;
+      color: white;
+      border: none;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn-save:hover {
+      background: #059669;
+    }
+    .status-msg {
+      font-size: 11px;
+      text-align: center;
+      font-weight: 600;
+      min-height: 16px;
+    }
+    .status-success { color: #059669; }
+    .status-error { color: #dc2626; }
+    .footer {
+      border-top: 1px solid #e2e8f0;
+      padding: 10px 16px;
+      font-size: 11px;
+      color: #64748b;
+      text-align: center;
+      background: #f1f5f9;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div style="font-size: 20px;">⚡</div>
+    <div>
+      <h1>PingLead Copilot</h1>
+      <p>المساعد الذكي للمستقلين</p>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="field">
+      <label for="userId">معرف المستخدم (User ID):</label>
+      <input type="text" id="userId" placeholder="انسخ معرفك من إعدادات حسابك">
+      <span style="font-size: 10px; color: #64748b;">
+        يربط الإضافة بملفك الشخصي ونماذج أعمالك في PingLead.
+      </span>
+    </div>
+
+    <div class="field">
+      <label for="serverUrl">رابط خادم PingLead:</label>
+      <input type="text" id="serverUrl" placeholder="http://localhost:3000">
+    </div>
+
+    <button class="btn-save" id="saveBtn">
+      <span>💾</span>
+      <span>حفظ الإعدادات</span>
+    </button>
+
+    <div class="status-msg" id="statusMsg"></div>
+  </div>
+
+  <div class="footer">
+    يعمل تلقائياً على Upwork و Mostaql
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

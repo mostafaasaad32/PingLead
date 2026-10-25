@@ -48,6 +48,7 @@ process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
 run("web", "npx", ["next", "dev"]);
+run("sidecar", "python", ["-m", "uvicorn", "main:app", "--port", "8000", "--app-dir", "scrapling_service"]);
 
 if (hasBotToken) {
   run("bot", "node", ["scripts/telegram_poll_dev.mjs"]);

@@ -8,6 +8,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:ingest": "node scripts/dev.mjs --ingest",
     "dev:web": "next dev",
+    "sidecar": "python -m uvicorn main:app --port 8000 --app-dir scrapling_service --reload",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
