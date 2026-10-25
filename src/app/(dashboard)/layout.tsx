@@ -4,6 +4,7 @@
 // ==============================================================================
 
 import TopNavbar from "@/components/navigation/TopNavbar";
+import FeedbackButton from "@/components/feedback/FeedbackButton";
 
 export default function DashboardLayout({
   children,
@@ -19,6 +20,9 @@ export default function DashboardLayout({
       <main className="flex-1 w-full max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {children}
       </main>
+
+      {/* Beta feedback ("رأيك") */}
+      <FeedbackButton />
 
       {/* Clean Vollna-style Footer */}
       <footer className="border-t border-slate-200/80 bg-white py-6 mt-auto">
