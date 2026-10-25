@@ -335,6 +335,9 @@ export interface UnifiedProject extends ProjectInsights {
   budget_usd_estimate?: number | null;
   language: ProjectLanguage;
   category: ProjectCategory;
+  raw_category?: string | null;
+  raw_subcategory?: string | null;
+  raw_skills?: string[] | null;
   author: string;
   published_at: string; // ISO 8601 string
   created_at?: string;
@@ -357,17 +360,20 @@ export interface UnifiedProject extends ProjectInsights {
  */
 export interface ProjectInsights {
   bids_count?: number | null;
+  proposals_count?: number | null;
   bids_avg?: number | null;
   client_hire_rate?: number | null; // 0-100
   client_open_projects?: number | null;
   client_in_progress?: number | null;
   client_registered_at?: string | null;
   client_country?: string | null;
+  client_profession?: string | null;
   duration_text?: string | null;
   details_fetched_at?: string | null;
   /** Fixed-price or hourly. Used for matching only (not stored). */
   job_type?: 'fixed' | 'hourly' | null;
   payment_verified?: boolean | null;
+  client_payment_verified?: boolean | null;
   total_spent?: string | null;
   client_rating?: number | null;
   client_evaluation?: ClientEvaluation | null;
@@ -543,6 +549,9 @@ export function createUnifiedProject(params: {
   currency?: string | null;
   language: ProjectLanguage;
   category: ProjectCategory;
+  raw_category?: string | null;
+  raw_subcategory?: string | null;
+  raw_skills?: string[] | null;
   published_at?: string;
   author?: string;
   insights?: ProjectInsights;
@@ -576,6 +585,9 @@ export function createUnifiedProject(params: {
     budget_usd_estimate,
     language: params.language,
     category: params.category,
+    raw_category: params.raw_category || null,
+    raw_subcategory: params.raw_subcategory || null,
+    raw_skills: params.raw_skills || null,
     published_at,
     author,
     // Aliases for backward compatibility

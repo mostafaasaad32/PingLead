@@ -7,7 +7,7 @@
 
 import { UnifiedProject, createUnifiedProject, ProjectCategory, ProjectInsights } from './types';
 import { parseArabicRelativeDate } from './utils';
-import { classifyProjectCategory } from '../filters/categorizer';
+import { classifyProject } from '../taxonomy';
 import { calculateClientScore } from '../scoring/client-scorer';
 import { fetchFromScrapling, mapScraplingJobsToUnified } from './scrapling-bridge';
 
@@ -123,11 +123,13 @@ export async function scrapeMostaqlCategory(
       const rawDate = timeTagMatch ? timeTagMatch[1] : (agoMatch ? agoMatch[1].replace(/<[^>]*>/g, '').trim() : null);
       const publishedAt = parseArabicRelativeDate(rawDate);
 
-      // No budget here: the listing card doesn't show it, and guessing from the title
-      // picked up numbers like "14 يوم". fetchMostaqlProjectDetails reads the real range.
-
-      // Category classification
-      const detectedCat = classifyProjectCategory(`${cleanTitle} ${brief}`, categorySlug);
+      // Category classification via 3-Layer Master Taxonomy
+      const classResult = classifyProject({
+        platform: 'mostaql',
+        title: cleanTitle,
+        description: brief,
+        rawCategory: categorySlug !== 'all' ? mostaqlCategory : undefined,
+      });
 
       projects.push(
         createUnifiedProject({
@@ -141,7 +143,8 @@ export async function scrapeMostaqlCategory(
           budget_max: null,
           currency: 'USD',
           language: 'ar',
-          category: detectedCat,
+          category: classResult.category,
+          raw_category: categorySlug !== 'all' ? mostaqlCategory : null,
           published_at: publishedAt,
           author,
           insights: { bids_count: bidsCount },
@@ -163,7 +166,7 @@ const stripHtml = (s: string) =>
 
 /**
  * Reads a Mostaql project page for what the listing doesn't show:
- * the full description, delivery time, and the client's hiring history.
+ * the full description, delivery time, skills, and the client's hiring history.
  * Returns null when the page can't be read.
  */
 export interface MostaqlProjectDetails extends ProjectInsights {
@@ -172,6 +175,7 @@ export interface MostaqlProjectDetails extends ProjectInsights {
   budget_max?: number | null;
   /** Mostaql's own category slug from the breadcrumb, e.g. "ai-machine-learning" */
   platform_category?: string | null;
+  skills?: string[];
 }
 
 export async function fetchMostaqlProjectDetails(
@@ -262,8 +266,13 @@ export async function fetchMostaqlProjectDetails(
       budget_max: maxBudget,
     });
 
+    const skills = [...html.matchAll(/class="[^"]*skill[^"]*"[^>]*>([\s\S]*?)<\/(?:span|a|li)>/gi)]
+      .map((m) => m[1].replace(/<[^>]*>/g, '').trim())
+      .filter((s) => s && s.length < 50);
+
     return {
       platform_category: categoryMatch ? categoryMatch[1] : null,
+      skills: skills.length > 0 ? skills : undefined,
       budget_min: minBudget,
       budget_max: maxBudget,
       description,

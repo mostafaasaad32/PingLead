@@ -6,7 +6,8 @@
 
 import { UnifiedProject, createUnifiedProject, ProjectCategory } from './types';
 import { parseArabicRelativeDate } from './utils';
-import { classifyProjectCategory, extractCleanBudget } from '../filters/categorizer';
+import { extractCleanBudget } from '../filters/categorizer';
+import { classifyProject } from '../taxonomy';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
 
@@ -86,6 +87,10 @@ export async function scrapeBaeedCategory(
       }
     }
 
+    const rawCategory = url.includes('/categories/')
+      ? url.split('/categories/')[1].replace(/-jobs$/, '')
+      : (categorySlug !== 'all' ? categorySlug : null);
+
     for (const [jobUrl, data] of jobsMap.entries()) {
       if (projects.length >= limit) break;
 
@@ -95,7 +100,12 @@ export async function scrapeBaeedCategory(
       const company = data.id.split('-')[0] || 'صاحب عمل';
       const publishedAt = parseArabicRelativeDate(data.rawDate);
 
-      const detectedCat = classifyProjectCategory(`${title} ${description}`, categorySlug);
+      const classResult = classifyProject({
+        platform: 'baeed',
+        title,
+        description,
+        rawCategory,
+      });
       const budget = extractCleanBudget(`${title} ${description}`);
 
       projects.push(
@@ -110,7 +120,8 @@ export async function scrapeBaeedCategory(
           budget_max: budget.budget_max,
           currency: budget.currency || 'USD',
           language: 'ar',
-          category: detectedCat,
+          category: classResult.category,
+          raw_category: rawCategory,
           published_at: publishedAt,
           author: company,
         })

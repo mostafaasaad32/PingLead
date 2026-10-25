@@ -7,7 +7,7 @@
 // ==============================================================================
 
 import { UnifiedProject, createUnifiedProject } from './types';
-import { classifyProjectCategory } from '../filters/categorizer';
+import { classifyProject } from '../taxonomy';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
 const BASE_URL = 'https://www.peopleperhour.com/freelance-jobs';
@@ -105,6 +105,19 @@ export async function scrapePphCategory(
       const currency = job.currency || 'USD';
       const isHourly = job.project_type === 'hourly';
 
+      const rawCat = job.category?.cate_name || null;
+      const rawSub = typeof job.sub_category === 'object' ? job.sub_category?.subcate_name : (job.sub_category || null);
+      const rawSkills: string[] = Array.isArray((job as any).skills) ? (job as any).skills : [];
+
+      const classResult = classifyProject({
+        platform: 'pph',
+        title: job.title,
+        description,
+        rawCategory: rawCat || categorySlug,
+        rawSubCategory: rawSub,
+        skills: rawSkills,
+      });
+
       projects.push(
         createUnifiedProject({
           external_id: String(job.proj_id),
@@ -118,8 +131,10 @@ export async function scrapePphCategory(
           budget_max: isHourly ? null : budget,
           currency,
           language: 'en',
-          // PPH's own category ("Technology & Programming", ...) is the best hint
-          category: classifyProjectCategory(`${job.title} ${description}`, job.category?.cate_name || categorySlug),
+          category: classResult.category,
+          raw_category: rawCat,
+          raw_subcategory: rawSub,
+          raw_skills: rawSkills.length > 0 ? rawSkills : null,
           // posted_dt is "YYYY-MM-DD HH:mm:ss" (UK time); treat as UTC
           published_at: job.posted_dt
             ? new Date(job.posted_dt.replace(' ', 'T') + 'Z').toISOString()

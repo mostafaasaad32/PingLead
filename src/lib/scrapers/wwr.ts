@@ -5,7 +5,8 @@
 // ==============================================================================
 
 import { UnifiedProject, createUnifiedProject, ProjectCategory } from './types';
-import { classifyProjectCategory, extractCleanBudget } from '../filters/categorizer';
+import { extractCleanBudget } from '../filters/categorizer';
+import { classifyProject } from '../taxonomy';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
 
@@ -92,9 +93,14 @@ export async function scrapeWwrCategory(
         author = parts[0].trim();
       }
 
-      // WWR's own <category> (e.g. "Full-Stack Programming") is the best hint when the text is vague
-      const wwrCategory = itemXml.match(/<category>([\s\S]*?)<\/category>/i)?.[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/i, '$1').trim();
-      const cat = classifyProjectCategory(`${title} ${desc}`, wwrCategory || categorySlug);
+      // WWR's own <category> (e.g. "Full-Stack Programming") is the authoritative native category
+      const wwrCategory = itemXml.match(/<category>([\s\S]*?)<\/category>/i)?.[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/i, '$1').trim() || null;
+      const classResult = classifyProject({
+        platform: 'wwr',
+        title,
+        description: desc,
+        rawCategory: wwrCategory || categorySlug,
+      });
       const budget = extractCleanBudget(`${title} ${desc}`);
 
       projects.push(
@@ -109,7 +115,8 @@ export async function scrapeWwrCategory(
           budget_max: budget.budget_max,
           currency: budget.currency || 'USD',
           language: 'en',
-          category: cat,
+          category: classResult.category,
+          raw_category: wwrCategory,
           published_at: pubDate,
           author,
         })

@@ -90,6 +90,7 @@ export async function generateContextAwareProposal(
     : input.freelancerSkills || 'Full-Stack Development, Modern UI/UX, Performance Optimization';
 
   const tone = input.toneOfVoice || 'confident';
+  const isKhamsat = (input.platform || '').toLowerCase().includes('khamsat');
 
   // 3. Build optimized Gemini prompt
   const promptText = `
@@ -108,7 +109,14 @@ FREELANCER PROFILE:
 - Tone of Voice: ${tone} (Write with a ${tone} attitude)
 ${input.customInstructions ? `- Special User Custom Instructions: ${input.customInstructions}` : ''}
 ${input.standingInstructions?.trim() ? `- The freelancer's standing instructions (ALWAYS follow these): ${input.standingInstructions.trim().slice(0, 1000)}` : ''}
-
+${isKhamsat ? `
+- SPECIAL KHAMSAT COMMUNITY DIRECTIVE:
+  * This request is posted in Khamsat community buyer requests ("طلبات الخدمات غير الموجودة").
+  * Format the response as a concise, persuasive reply tailored for Khamsat request comments ("رد مقنع ومختصر مناسب لتعليقات طلبات مجتمع خمسات").
+  * Clearly emphasize immediate readiness to deliver the exact service professionally and promptly ("يوضح جاهزيته لتنفيذ الخدمة فوراً بمهنية").
+  * Mention that the service can be ordered directly through your Khamsat gig/profile.
+  * Keep it punchy, respectful, and focused (around 40-70 words).
+` : ''}
 ${input.pricingHint ? `PRICING GUIDANCE (REQUIRED):\n${input.pricingHint}\nThe proposal MUST include one explicit sentence with your price and delivery time (e.g. "أقدر أسلّم خلال 7 أيام بتكلفة 150$" / "I can deliver in 7 days for $150"), placed right before the closing question.\n` : ''}
 ${portfolioPromptContext}
 

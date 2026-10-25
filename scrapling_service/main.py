@@ -64,6 +64,9 @@ class MostaqlRequest(BaseModel):
     category: str = "development"
     limit: int = 20
 
+class KhamsatRequest(BaseModel):
+    url: str
+
 @app.get("/health")
 def health_check():
     return {
@@ -340,9 +343,32 @@ def scrape_mostaql(req: MostaqlRequest):
         logger.info(f"Successfully scraped {len(jobs)} projects from Mostaql.")
         return jobs
 
+# ------------------------------------------------------------------------------
+# 4. Khamsat Endpoint (/scrape/khamsat)
+# Resolves AWS WAF challenge via Patchright and extracts token & content
+# ------------------------------------------------------------------------------
+@app.post("/scrape/khamsat")
+async def scrape_khamsat(req: KhamsatRequest):
+    logger.info(f"Resolving Khamsat with Patchright: {req.url}...")
+    try:
+        from patchright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+                locale="ar-EG"
+            )
+            page = await context.new_page()
+            await page.goto("https://khamsat.com/community/requests", wait_until="domcontentloaded")
+            await page.goto(req.url, wait_until="networkidle")
+            content = await page.content()
+            cookies = await context.cookies()
+            waf_token = next((c['value'] for c in cookies if 'aws-waf-token' in c['name'].lower()), None)
+            await browser.close()
+            return {"html": content, "waf_token": waf_token}
     except Exception as e:
-        logger.error(f"Error scraping Mostaql: {str(e)}")
-        return []
+        logger.error(f"Error scraping Khamsat via Patchright: {str(e)}")
+        return {"html": "", "waf_token": None, "error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { calculateClientScore } from '@/lib/scoring/client-scorer';
 import { generateContextAwareProposal } from '@/lib/ai/proposal-generator';
-import { classifyProjectCategory } from '@/lib/filters/categorizer';
+import { classifyProject } from '@/lib/taxonomy';
 import { buildPostText, estimateBudgetUsd } from '@/lib/scrapers/types';
 
 export const dynamic = 'force-dynamic';
@@ -45,6 +45,8 @@ export async function POST(req: NextRequest) {
       externalId: rawExternalId,
       clientData = {},
       customInstructions,
+      rawCategory,
+      skills,
     } = body;
 
     // 1. Client Evaluation Algorithm
@@ -90,7 +92,15 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. AI Proposal Generation
-    const category = classifyProjectCategory(title, description);
+    const classResult = classifyProject({
+      platform,
+      title,
+      description,
+      rawCategory: rawCategory || null,
+      skills: Array.isArray(skills) ? skills : null,
+    });
+    const category = classResult.category;
+
     const proposalOutput = await generateContextAwareProposal({
       title,
       description: description || title,

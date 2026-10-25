@@ -49,8 +49,12 @@
     const rating = ratingMatch ? parseFloat(ratingMatch[1]) : null;
 
     // Country
-    const locationMatch = clientText.match(/(?:location|from)\s*:\s*([a-zA-Z\s]+)/i);
-    const country = locationMatch ? locationMatch[1].trim() : null;
+    // Category & Skills extraction
+    const specialtyEl = document.querySelector('[data-qa="client-job-specialty"], [data-test="JobTileSpecialty"], .job-details a[href*="/freelance-jobs/"]');
+    const rawCategory = specialtyEl ? specialtyEl.innerText.trim() : null;
+
+    const skillEls = document.querySelectorAll('[data-qa="skill__name"], .air3-token, a[href*="/nx/search/jobs/?skills="]');
+    const skills = Array.from(skillEls).map(el => el.innerText.trim()).filter(Boolean);
 
     return {
       platform: "upwork",
@@ -58,6 +62,8 @@
       description,
       budget,
       url: window.location.href,
+      rawCategory,
+      skills,
       clientData: {
         paymentVerified,
         totalSpent,
@@ -77,6 +83,13 @@
 
     const budgetEl = document.querySelector(".project-budget_range, [data-type='project-budget_range']");
     const budget = budgetEl ? budgetEl.innerText.trim() : null;
+
+    // Breadcrumb category & skills
+    const breadcrumbEl = document.querySelector('.breadcrumb-item:last-child a, .breadcrumb-item:last-child');
+    const rawCategory = breadcrumbEl ? breadcrumbEl.innerText.trim() : null;
+
+    const skillEls = document.querySelectorAll('.skills__item, a[href*="/skills/"]');
+    const skills = Array.from(skillEls).map(el => el.innerText.trim()).filter(Boolean);
 
     const bodyText = document.body.innerText;
 
@@ -103,6 +116,8 @@
       description,
       budget,
       url: window.location.href,
+      rawCategory,
+      skills,
       clientData: {
         paymentVerified,
         hireRate,

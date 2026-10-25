@@ -242,7 +242,8 @@ function ClientIntelligenceCard({
   projectTitle?: string;
   platform?: string;
 }) {
-  const styles = getClientBadgeStyles(evaluation.score);
+  const isCorp = Boolean(evaluation.isCorporateJob || ['baeed', 'remoteok', 'wwr'].includes(platform || evaluation.platform || ""));
+  const styles = getClientBadgeStyles(evaluation.score, isCorp);
   const targetPlatform = platform || evaluation.platform || "";
   const chips =
     evaluation.metricsChips && evaluation.metricsChips.length > 0
@@ -277,11 +278,13 @@ function ClientIntelligenceCard({
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-black text-slate-900 text-base">{styles.title}</span>
-              <span
-                className={`font-mono font-black px-2.5 py-0.5 rounded-full text-xs ${styles.bg} ${styles.text} border ${styles.border}`}
-              >
-                {evaluation.score.toFixed(1)} / 10
-              </span>
+              {evaluation.score !== null && (
+                <span
+                  className={`font-mono font-black px-2.5 py-0.5 rounded-full text-xs ${styles.bg} ${styles.text} border ${styles.border}`}
+                >
+                  {evaluation.score.toFixed(1)} / 10
+                </span>
+              )}
               {targetPlatform && <PlatformBadge platform={targetPlatform} />}
             </div>
             <p className="text-xs font-bold text-slate-600 mt-1">{evaluation.labelAr}</p>
@@ -428,8 +431,42 @@ function ClientIntelligenceCard({
 function ClientScorePill({ data }: { data: any }) {
   const [isOpen, setIsOpen] = useState(false);
   const evaluation = resolveClientEvaluation(data);
-  const styles = getClientBadgeStyles(evaluation.score);
 
+  // 1. Hide client badge completely if data is not available (e.g. Khamsat)
+  if (evaluation.hideClientBadge) {
+    return null;
+  }
+
+  const isCorp = Boolean(evaluation.isCorporateJob || ['baeed', 'remoteok', 'wwr'].includes(data?.platform));
+  const styles = getClientBadgeStyles(evaluation.score, isCorp);
+
+  // 2. Corporate job board: Clear company job badge without 10-point scale
+  if (isCorp) {
+    return (
+      <span
+        className={`h-6 px-2 rounded-md text-[11px] font-medium border flex items-center gap-1 select-none shadow-2xs shrink-0 ${styles.bg} ${styles.border} ${styles.text}`}
+        title="وظيفة شركة عن بُعد"
+      >
+        <span>🏢</span>
+        <span>وظيفة شركة عن بُعد</span>
+      </span>
+    );
+  }
+
+  // 3. Platform without numeric client rating (e.g. PPH without numerical hire rate)
+  if (evaluation.score === null) {
+    return (
+      <span
+        className={`h-6 px-2 rounded-md text-[11px] font-medium border flex items-center gap-1 select-none shadow-2xs shrink-0 ${styles.bg} ${styles.border} ${styles.text}`}
+        title={evaluation.labelAr || "بيانات العميل"}
+      >
+        <span>{styles.icon}</span>
+        <span>{styles.title}</span>
+      </span>
+    );
+  }
+
+  // 4. Standard verified numeric client score badge
   return (
     <>
       <button
@@ -944,7 +981,8 @@ export default function DashboardPage() {
     }
     if (hideRiskyClients) {
       const clientEval = resolveClientEvaluation(lead);
-      if (clientEval.score < 6.0) return false;
+      // Exempt Khamsat and any projects without numeric score (corporate jobs, etc.) so they stay visible
+      if (clientEval.score !== null && clientEval.score < 6.0) return false;
     }
     return true;
   });
@@ -961,7 +999,7 @@ export default function DashboardPage() {
     if (selectedCategory !== "all" && !isCategoryMatch(item.category, selectedCategory)) return false;
     if (hideRiskyClients) {
       const clientEval = resolveClientEvaluation(item);
-      if (clientEval.score < 6.0) return false;
+      if (clientEval.score !== null && clientEval.score < 6.0) return false;
     }
     return true;
   });

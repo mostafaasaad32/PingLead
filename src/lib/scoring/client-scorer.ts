@@ -15,9 +15,11 @@ export interface ClientMetricChip {
 }
 
 export interface ClientEvaluation {
-  score: number; // من 0 إلى 10 (مثلاً 8.5)
-  badge: "excellent" | "good" | "warning" | "high_risk";
-  labelAr: string; // مثلاً: "عميل ممتاز - يوظف بانتظام" أو "تحذير: معدل توظيف منخفض"
+  score: number | null; // من 0 إلى 10 (مثلاً 8.5) أو null إذا غير متوفر
+  hideClientBadge?: boolean; // إخفاء الشارة تماماً إذا كانت البيانات غير متوفرة (مثل خمسات)
+  isCorporateJob?: boolean; // وظيفة شركة عن بعد (مثل بعيد، RemoteOK، WWR)
+  badge: "excellent" | "good" | "warning" | "high_risk" | "corporate" | "none";
+  labelAr: string; // مثلاً: "عميل ممتاز - يوظف بانتظام" أو "وظيفة شركة عن بعد"
   hireRate?: number; // نسبة التوظيف %
   totalSpent?: string; // إجمالي الإنفاق
   paymentVerified: boolean;
@@ -27,7 +29,7 @@ export interface ClientEvaluation {
   inProgressProjects?: number; // عدد المشاريع قيد التنفيذ
   clientProfession?: string; // مهنة أو تخصص العميل إن وجد (مثل نفذلي)
   platform?: string; // معرف المنصة
-  metricsChips?: ClientMetricChip[]; // كروت المؤشرات الأربعة المتكيفة تلقائياً مع المنصة
+  metricsChips?: ClientMetricChip[]; // كروت المؤشرات المتكيفة تلقائياً مع المنصة
   redFlags: string[]; // قائمة التحذيرات
   greenFlags: string[]; // قائمة المميزات
   negotiationTipAr?: string; // نصيحة تفاوضية سريعة للفريلانسر
@@ -96,7 +98,7 @@ export function buildPlatformMetricsChips(params: {
   clientProfession?: string;
   clientRating?: number;
   totalSpent?: string;
-  score: number;
+  score?: number | null;
 }): ClientMetricChip[] {
   const p = (params.platform || "").toLowerCase();
 
@@ -379,6 +381,58 @@ export function calculateClientScore(jobData: ClientJobData | any): ClientEvalua
   const isPph = platform.includes("pph");
   const isKafiil = platform.includes("kafiil");
 
+  // Specific Khamsat handling: No fake numeric score, hide client badge, zero false warnings
+  if (isKhamsat) {
+    return {
+      score: null,
+      hideClientBadge: true,
+      badge: "none",
+      labelAr: "طلب خدمة في خمسات",
+      hireRate: undefined,
+      totalSpent: undefined,
+      paymentVerified: Boolean(jobData.payment_verified ?? jobData.insights?.payment_verified),
+      clientCountry: undefined,
+      platform: "khamsat",
+      metricsChips: buildPlatformMetricsChips({
+        platform: "khamsat",
+        paymentVerified: Boolean(jobData.payment_verified ?? jobData.insights?.payment_verified),
+        score: null,
+      }),
+      redFlags: [],
+      greenFlags: [
+        "طلب خدمة في مجتمع خمسات - التعامل والضمان المالي محمي عبر حسوب",
+        "المشتري يدفع ويحجز المبلغ عند طلب الخدمة مباشرة"
+      ],
+      negotiationTipAr: "في خمسات: المشتري يبحث عن خدمة واضحة وجاهزة؛ وضح له بالضبط ما سيحصل عليه بالخدمة الأساسية وسعر التطويرات الإضافية إن لزم."
+    };
+  }
+
+  // Specific Corporate Job Boards handling: Baeed, RemoteOK, WWR
+  if (isCorporatePlatform) {
+    return {
+      score: null,
+      hideClientBadge: false,
+      isCorporateJob: true,
+      badge: "corporate",
+      labelAr: "🏢 وظيفة شركة عن بُعد",
+      paymentVerified: true,
+      clientCountry,
+      platform,
+      metricsChips: buildPlatformMetricsChips({
+        platform,
+        paymentVerified: true,
+        clientCountry,
+        score: null,
+      }),
+      redFlags: [],
+      greenFlags: [
+        "وظيفة شركة عن بُعد بمواصفات رسمية",
+        "التعاقد والراتب يخضع لسياسة الشركة المباشرة"
+      ],
+      negotiationTipAr: "شركة تبحث عن محترف طويل الأمد؛ ركز في خطابك على سنوات خبرتك ومشاريعك السابقة الموثقة والتزامك بالمواعيد."
+    };
+  }
+
   // --- PILLAR 1: PLATFORM FINANCIAL SECURITY & ESCROW ---
   if (isCorporatePlatform) {
     // Job boards publish nothing about the employer: no bonus, and no claims we can't back
@@ -555,28 +609,36 @@ export function calculateClientScore(jobData: ClientJobData | any): ClientEvalua
   // Without any client history (hire rate or rating) a clear post can't make a client
   // "excellent": the score is capped, so the badge reflects what we actually know.
   const hasHistory = hireRate !== undefined || clientRating !== undefined;
-  const NO_HISTORY_CAP = 7.0;
-  let finalScore = Math.min(10.0, Math.max(1.0, Math.round(score * 10) / 10));
-  if (!hasHistory) finalScore = Math.min(finalScore, NO_HISTORY_CAP);
-
-  // 4. Badges & Labels: only claim what the data shows
+  let finalScore: number | null = null;
   let badge: ClientEvaluation["badge"] = "good";
   let labelAr = "عميل متوسط - فرصة مناسبة";
 
-  if (finalScore >= 8.0) {
-    badge = "excellent";
-    labelAr =
-      hireRate !== undefined && hireRate >= 70
-        ? "عميل موثوق - بيوظف بانتظام"
-        : "عميل بسجل كويس على المنصة";
-  } else if (finalScore >= 5.5) {
+  if (isPph && !hasHistory) {
+    // If no numeric hire rate or review history, don't show a fake 7.0/10 score
+    finalScore = null;
     badge = "good";
-    labelAr = hasHistory
-      ? "عميل متوسط - فرصة مقبولة مع تدقيق الشروط"
-      : "مفيش سجل كافي عن العميل - احكم من وصف المشروع";
+    labelAr = "عميل دولي موثق (PeoplePerHour)";
   } else {
-    badge = "high_risk";
-    labelAr = "عميل عالي المخاطر - احذر من ضياع العروض";
+    const NO_HISTORY_CAP = 7.0;
+    finalScore = Math.min(10.0, Math.max(1.0, Math.round(score * 10) / 10));
+    if (!hasHistory) finalScore = Math.min(finalScore, NO_HISTORY_CAP);
+
+    // 4. Badges & Labels: only claim what the data shows
+    if (finalScore >= 8.0) {
+      badge = "excellent";
+      labelAr =
+        hireRate !== undefined && hireRate >= 70
+          ? "عميل موثوق - بيوظف بانتظام"
+          : "عميل بسجل كويس على المنصة";
+    } else if (finalScore >= 5.5) {
+      badge = "good";
+      labelAr = hasHistory
+        ? "عميل متوسط - فرصة مقبولة مع تدقيق الشروط"
+        : "مفيش سجل كافي عن العميل - احكم من وصف المشروع";
+    } else {
+      badge = "high_risk";
+      labelAr = "عميل عالي المخاطر - احذر من ضياع العروض";
+    }
   }
 
   // 5. Build dynamic platform-tailored metric chips
@@ -628,7 +690,7 @@ export function calculateClientScore(jobData: ClientJobData | any): ClientEvalua
  * Generates actionable, strategic negotiation advice tailored to the client's profile and platform.
  */
 function generateNegotiationTip(params: {
-  score: number;
+  score: number | null;
   budgetUsd: number | null;
   hireRate?: number;
   isComplexScope: boolean;
@@ -668,7 +730,7 @@ function generateNegotiationTip(params: {
     return "شركة تبحث عن محترف طويل الأمد؛ ركز في خطابك على سنوات خبرتك ومشاريعك السابقة الموثقة والتزامك بالمواعيد.";
   }
 
-  if (params.score >= 8.0) {
+  if (params.score !== null && params.score >= 8.0) {
     if (params.budgetUsd && params.budgetUsd >= 200) {
       return "عميل ذو ميزانية عالية وموثوقية ممتازة؛ ركز في عرضك على الجودة وسابقة الأعمال وضمانات ما بعد التسليم بدلاً من التنافس على خفض السعر.";
     }
@@ -689,7 +751,27 @@ function generateNegotiationTip(params: {
 /**
  * Returns tailored badge UI properties (colors, borders, icons)
  */
-export function getClientBadgeStyles(score: number) {
+export function getClientBadgeStyles(score: number | null, isCorporate?: boolean) {
+  if (isCorporate) {
+    return {
+      bg: "bg-purple-50 dark:bg-purple-950/40",
+      border: "border-purple-200 dark:border-purple-800/60",
+      text: "text-purple-700 dark:text-purple-300",
+      accent: "bg-purple-500",
+      icon: "🏢",
+      title: "وظيفة شركة عن بُعد",
+    };
+  }
+  if (score === null || score === undefined) {
+    return {
+      bg: "bg-slate-50 dark:bg-slate-900/40",
+      border: "border-slate-200 dark:border-slate-800/60",
+      text: "text-slate-700 dark:text-slate-300",
+      accent: "bg-slate-500",
+      icon: "👤",
+      title: "بيانات العميل",
+    };
+  }
   if (score >= 8.0) {
     return {
       bg: "bg-emerald-50 dark:bg-emerald-950/40",

@@ -132,7 +132,8 @@ async function auditPlatform(
         if (budgetSamples.length < 3) budgetSamples.push(p.budget);
       }
 
-      if (typeof p.insights?.bids_count === 'number') {
+      const pAny = p as any;
+      if (typeof (pAny.insights?.bids_count ?? p.bids_count) === 'number') {
         withBids++;
       }
 
@@ -142,11 +143,11 @@ async function auditPlatform(
       }
 
       // Client metrics
-      if (typeof p.insights?.client_hire_rate === 'number') withHireRate++;
-      if (p.insights?.payment_verified) withPaymentVerified++;
-      if (p.insights?.total_spent) withTotalSpent++;
-      if (typeof p.insights?.client_rating === 'number') withClientRating++;
-      if (p.insights?.client_country) withClientCountry++;
+      if (typeof (pAny.insights?.client_hire_rate ?? p.client_hire_rate) === 'number') withHireRate++;
+      if (pAny.insights?.payment_verified ?? p.payment_verified) withPaymentVerified++;
+      if (pAny.insights?.total_spent ?? p.total_spent) withTotalSpent++;
+      if (typeof (pAny.insights?.client_rating ?? p.client_rating) === 'number') withClientRating++;
+      if (pAny.insights?.client_country ?? p.client_country) withClientCountry++;
       if (p.author && authorSamples.length < 3) authorSamples.push(p.author);
 
       // Score evaluation
@@ -159,24 +160,27 @@ async function auditPlatform(
         budget_max: p.budget_max,
         currency: p.currency,
         author: p.author,
-        client_hire_rate: p.insights?.client_hire_rate,
-        client_open_projects: p.insights?.client_open_projects,
-        client_in_progress: p.insights?.client_in_progress,
-        client_registered_at: p.insights?.client_registered_at,
-        client_country: p.insights?.client_country,
-        client_profession: p.insights?.client_profession,
-        client_rating: p.insights?.client_rating,
-        payment_verified: p.insights?.payment_verified,
-        total_spent: p.insights?.total_spent,
-        insights: p.insights,
+        client_hire_rate: pAny.insights?.client_hire_rate ?? p.client_hire_rate,
+        client_open_projects: pAny.insights?.client_open_projects ?? p.client_open_projects,
+        client_in_progress: pAny.insights?.client_in_progress ?? p.client_in_progress,
+        client_registered_at: pAny.insights?.client_registered_at ?? p.client_registered_at,
+        client_country: pAny.insights?.client_country ?? p.client_country,
+        client_profession: pAny.insights?.client_profession ?? p.client_profession,
+        client_rating: pAny.insights?.client_rating ?? p.client_rating,
+        payment_verified: pAny.insights?.payment_verified ?? p.payment_verified,
+        total_spent: pAny.insights?.total_spent ?? p.total_spent,
+        insights: pAny.insights ?? p,
       });
 
-      totalClientScore += scoreObj.score;
-      if (sampleScores.length < 5) sampleScores.push(scoreObj.score);
+      if (scoreObj.score !== null) {
+        totalClientScore += scoreObj.score;
+        if (sampleScores.length < 5) sampleScores.push(scoreObj.score);
+      }
     }
 
     const n = projects.length;
     const sample = projects[0];
+    const sampleAny = sample as any;
     const sampleScore = calculateClientScore({
       platform: sample.platform,
       title: sample.title,
@@ -186,7 +190,7 @@ async function auditPlatform(
       budget_max: sample.budget_max,
       currency: sample.currency,
       author: sample.author,
-      insights: sample.insights,
+      insights: sampleAny.insights ?? sample,
     });
 
     const isDefaultScoring = withHireRate === 0 && withTotalSpent === 0 && withClientRating === 0;
@@ -225,7 +229,7 @@ async function auditPlatform(
         budget: sample.budget,
         published_at: sample.published_at,
         author: sample.author || 'N/A',
-        insights: sample.insights,
+        insights: (sample as any).insights ?? sample,
         clientScore: {
           score: sampleScore.score,
           badge: sampleScore.badge,

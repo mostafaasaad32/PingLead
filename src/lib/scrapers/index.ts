@@ -8,12 +8,12 @@
 // ==============================================================================
 
 import { UnifiedProject, FreelancePlatform, PROJECT_INSIGHT_KEYS, buildPostText } from './types';
-import { classifyProjectCategory } from '../filters/categorizer';
+import { classifyProject } from '../taxonomy';
 import { classifyCategoriesWithAi } from '../ai/category-classifier';
 import { scrapeMostaqlCategory, fetchMostaqlProjectDetails } from './mostaql';
-import { scrapeNafezlyCategory } from './nafezly';
-import { scrapeKhamsatCategory } from './khamsat';
-import { scrapeKafiilCategory } from './kafiil';
+import { scrapeNafezlyCategory, fetchNafezlyProjectDetails } from './nafezly';
+import { scrapeKhamsatCategory, fetchKhamsatRequestDetails } from './khamsat';
+import { scrapeKafiilCategory, fetchKafiilProjectDetails } from './kafiil';
 import { scrapeBaeedCategory } from './baeed';
 
 import { scrapeFreelancerCategory } from './freelancer';
@@ -115,23 +115,29 @@ async function mergeAndEnrichInsights(projects: UnifiedProject[]): Promise<void>
 
   const platformCategoryHints = new Map<UnifiedProject, string>();
 
-  // Read Mostaql pages that were never enriched (or were enriched before budgets were read), newest first
-  const pending = projects
+  // 1. Mostaql: Read Mostaql pages that were never enriched (or were enriched before budgets were read), newest first
+  const pendingMostaql = projects
     .filter((p) => p.platform === 'mostaql' && (!p.details_fetched_at || p.budget_max == null))
     .sort((a, b) => (b.published_at || '').localeCompare(a.published_at || ''))
     .slice(0, MAX_DETAIL_FETCHES_PER_CYCLE);
 
-  for (let i = 0; i < pending.length; i += DETAIL_FETCH_CONCURRENCY) {
-    const batch = pending.slice(i, i + DETAIL_FETCH_CONCURRENCY);
+  for (let i = 0; i < pendingMostaql.length; i += DETAIL_FETCH_CONCURRENCY) {
+    const batch = pendingMostaql.slice(i, i + DETAIL_FETCH_CONCURRENCY);
     const details = await Promise.all(batch.map((p) => fetchMostaqlProjectDetails(p.url)));
     batch.forEach((p, idx) => {
       const d = details[idx];
       if (!d) return;
-      const { description, budget_min, budget_max, platform_category, ...insights } = d;
+      const { description, budget_min, budget_max, platform_category, skills, ...insights } = d;
       Object.assign(p, insights);
       if (description && description.length > (p.description || '').length) p.description = description;
-      // Mostaql's own category (breadcrumb): a hint for classifying new projects below
-      if (platform_category) platformCategoryHints.set(p, platform_category);
+      // Mostaql's own category (breadcrumb) & skills: authoritative source signals
+      if (platform_category) {
+        platformCategoryHints.set(p, platform_category);
+        p.raw_category = platform_category;
+      }
+      if (skills && skills.length > 0) {
+        p.raw_skills = skills;
+      }
       // The project page's budget range is authoritative
       if (budget_max) {
         p.budget_min = budget_min ?? budget_max;
@@ -143,25 +149,99 @@ async function mergeAndEnrichInsights(projects: UnifiedProject[]): Promise<void>
     });
   }
 
-  // Classify projects seen for the first time with the AI (keyword categories were wrong for ~half
-  // of real projects). Capped in time; anything not classified keeps its keyword category.
+  // 2. Khamsat: Incremental deep enrichment for authentic buyer description, rank, and proposals
+  const pendingKhamsat = projects
+    .filter((p) => p.platform === 'khamsat' && !p.details_fetched_at)
+    .sort((a, b) => (b.published_at || '').localeCompare(a.published_at || ''))
+    .slice(0, MAX_DETAIL_FETCHES_PER_CYCLE);
+
+  for (let i = 0; i < pendingKhamsat.length; i += DETAIL_FETCH_CONCURRENCY) {
+    const batch = pendingKhamsat.slice(i, i + DETAIL_FETCH_CONCURRENCY);
+    const details = await Promise.all(batch.map((p) => fetchKhamsatRequestDetails(p.url)));
+    batch.forEach((p, idx) => {
+      const d = details[idx];
+      if (!d) return;
+      const { description, author, author_rank, bids_count, payment_verified, client_evaluation, details_fetched_at } = d;
+      if (description && description.length > (p.description || '').length) p.description = description;
+      if (author) p.author = author;
+      if (bids_count != null) p.proposals_count = bids_count;
+      if (client_evaluation) p.client_evaluation = client_evaluation;
+      if (details_fetched_at) p.details_fetched_at = details_fetched_at;
+      if (payment_verified != null) p.client_payment_verified = payment_verified;
+    });
+  }
+
+  // 3. Kafiil: Incremental deep enrichment for real description, budget, and buyer details
+  const pendingKafiil = projects
+    .filter((p) => p.platform === 'kafiil' && !p.details_fetched_at)
+    .sort((a, b) => (b.published_at || '').localeCompare(a.published_at || ''))
+    .slice(0, MAX_DETAIL_FETCHES_PER_CYCLE);
+
+  for (let i = 0; i < pendingKafiil.length; i += DETAIL_FETCH_CONCURRENCY) {
+    const batch = pendingKafiil.slice(i, i + DETAIL_FETCH_CONCURRENCY);
+    const details = await Promise.all(batch.map((p) => fetchKafiilProjectDetails(p.url)));
+    batch.forEach((p, idx) => {
+      const d = details[idx];
+      if (!d) return;
+      const { description, budget_min, budget_max, budget_text, currency, author, ...insights } = d;
+      Object.assign(p, insights);
+      if (description && description.length > (p.description || '').length) p.description = description;
+      if (author) p.author = author;
+      if (budget_max) {
+        p.budget_min = budget_min ?? budget_max;
+        p.budget_max = budget_max;
+        p.currency = currency || 'USD';
+        p.budget = budget_text || (p.budget_min !== budget_max ? `${p.budget_min} - ${budget_max} USD` : `${budget_max} USD`);
+        p.budget_usd_estimate = budget_max;
+      }
+    });
+  }
+
+  // 4. Nafezly: Incremental deep enrichment for real description and buyer profile
+  const pendingNafezly = projects
+    .filter((p) => p.platform === 'nafezly' && !p.details_fetched_at)
+    .sort((a, b) => (b.published_at || '').localeCompare(a.published_at || ''))
+    .slice(0, MAX_DETAIL_FETCHES_PER_CYCLE);
+
+  for (let i = 0; i < pendingNafezly.length; i += DETAIL_FETCH_CONCURRENCY) {
+    const batch = pendingNafezly.slice(i, i + DETAIL_FETCH_CONCURRENCY);
+    const details = await Promise.all(batch.map((p) => fetchNafezlyProjectDetails(p.url)));
+    batch.forEach((p, idx) => {
+      const d = details[idx];
+      if (!d) return;
+      const { description, author, ...insights } = d;
+      Object.assign(p, insights);
+      if (description && description.length > (p.description || '').length) p.description = description;
+      if (author) p.author = author;
+    });
+  }
+
+  // Classify projects seen for the first time using the 3-Layer Master Taxonomy Engine
   const fresh = projects.filter((p) => !existing.has(`${p.platform}_${p.external_id}`));
   if (fresh.length) {
     const aiCategories = await classifyCategoriesWithAi(
-      fresh.map((p) => ({ title: p.title, description: p.description, platformCategory: platformCategoryHints.get(p) }))
+      fresh.map((p) => ({ title: p.title, description: p.description, platformCategory: platformCategoryHints.get(p) || p.raw_category }))
     );
     fresh.forEach((p, i) => {
-      const hint = platformCategoryHints.get(p);
-      const category = aiCategories[i] ?? (hint ? classifyProjectCategory(`${p.title} ${p.description}`, hint) : null);
-      if (category) {
-        p.category = category;
-        p.category_slug = category;
-      }
+      const hint = platformCategoryHints.get(p) || p.raw_category;
+      const classRes = classifyProject({
+        platform: p.platform,
+        title: p.title,
+        description: p.description,
+        rawCategory: hint,
+        rawSubCategory: p.raw_subcategory,
+        skills: p.raw_skills,
+      });
+
+      // Layer 1 (Direct Native) and Layer 2 (Domain-Locked) are 100% authoritative from the platform source
+      const finalCategory =
+        classRes.layer === 'direct_native' || classRes.layer === 'domain_locked'
+          ? classRes.category
+          : (aiCategories[i] ?? classRes.category);
+
+      p.category = finalCategory;
+      p.category_slug = finalCategory;
     });
-    const classified = aiCategories.filter(Boolean).length;
-    if (classified < fresh.length) {
-      console.warn(`[Aggregator] AI classified ${classified}/${fresh.length} new projects; the rest keep keyword categories.`);
-    }
   }
 
   // The leads_pool text (dashboard) embeds budget + description: rebuild it from the merged values
@@ -210,15 +290,15 @@ export async function scrapeAllPlatforms(
     );
   }
 
-  // 2. Global Platforms (Upwork + Freelancer + RemoteOK + WWR + PPH + Reddit)
+  // 2. Global Platforms (4: Freelancer + RemoteOK + WWR + PPH)
+  // Upwork is ingested via PingLead Copilot Chrome Extension to avoid 22s worker lag.
+  // Reddit is disabled from background scheduler due to persistent 403 server-side blocks.
   if (batch === 'all' || batch === 'global') {
     promises.push(
-      scrapeUpworkCategory(categorySlug, everything ? 30 : 20),
       scrapeFreelancerCategory(categorySlug, everything ? 50 : 20),
       scrapeRemoteOkCategory(categorySlug, everything ? 30 : 20),
       scrapeWwrCategory(categorySlug, everything ? 30 : 20),
-      scrapePphCategory(categorySlug, 20),
-      scrapeRedditCategory(categorySlug, everything ? 30 : 20)
+      scrapePphCategory(categorySlug, 20)
     );
   }
 

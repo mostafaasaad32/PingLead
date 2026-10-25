@@ -5,7 +5,7 @@
 // ==============================================================================
 
 import { UnifiedProject, createUnifiedProject, ProjectCategory, estimateBudgetUsd } from './types';
-import { classifyProjectCategory } from '../filters/categorizer';
+import { classifyProject } from '../taxonomy';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
 
@@ -41,7 +41,7 @@ export async function scrapeFreelancerCategory(
 ): Promise<UnifiedProject[]> {
   const query = encodeURIComponent(CATEGORY_QUERY_MAP[categorySlug] || '');
   const queryParam = query ? `&query=${query}` : '';
-  const url = `https://www.freelancer.com/api/projects/0.1/projects/active/?sort_field=time_submitted&compact=true&job_details=true&limit=${limit}${queryParam}`;
+  const url = `https://www.freelancer.com/api/projects/0.1/projects/active/?sort_field=time_submitted&compact=false&full_description=true&job_details=true&user_details=true&user_status=true&user_reputation=true&user_employer_reputation=true&limit=${limit}${queryParam}`;
 
   try {
     const res = await fetch(url, {
@@ -58,6 +58,7 @@ export async function scrapeFreelancerCategory(
 
     const data = await res.json();
     const projects = data.result?.projects || [];
+    const users = data.result?.users || {};
     const results: UnifiedProject[] = [];
 
     for (const p of projects) {
@@ -68,25 +69,69 @@ export async function scrapeFreelancerCategory(
       const min = p.budget?.minimum || null;
       const max = p.budget?.maximum || null;
       const budgetStr = (min || max) ? `${min || 0} - ${max || 0} ${currency}` : null;
-      const description = p.preview_description || p.title;
+      // Extract genuine full description from official API response
+      const description = p.description || p.preview_description || p.title;
 
-      // Freelancer's own skill categories ("Websites, IT & Software", ...) are the best hint
-      const jobHint = (p.jobs || [])
-        .map((j: any) => `${j.category?.name || ''} ${j.name || ''}`)
-        .join(' ')
-        .trim();
-      const cat = classifyProjectCategory(`${p.title} ${description}`, jobHint || categorySlug);
+      // Extract client metrics from result.users[owner_id]
+      const ownerId = p.owner_id;
+      const ownerUser = ownerId && users[ownerId] ? users[ownerId] : (p.owner || null);
 
+      const hasDeposit = Boolean(ownerUser?.status?.deposit_made || ownerUser?.deposit_made);
+      const isPaymentVerified = Boolean(
+        ownerUser?.status?.payment_verified ||
+        ownerUser?.payment_verified ||
+        hasDeposit ||
+        p.is_escrow_project ||
+        p.is_buyer_kyc_required ||
+        p.active_prepaid_milestone ||
+        p.upgrades?.active_prepaid_milestone ||
+        p.upgrades?.featured ||
+        p.upgrades?.urgent ||
+        p.upgrades?.recruiter ||
+        p.upgrades?.NDA ||
+        p.upgrades?.sealed
+      );
 
-      // The project's currency is not the client's country (Indian clients often post in USD),
-      // and the client-country filter relies on this value: use the stated location only
-      const detectedCountry = p.location?.country?.name || null;
+      const clientRating =
+        typeof ownerUser?.employer_reputation?.overall === 'number'
+          ? ownerUser.employer_reputation.overall
+          : typeof ownerUser?.reputation?.overall === 'number'
+            ? ownerUser.reputation.overall
+            : null;
 
-      const authorName = p.upgrades?.featured
-        ? 'عميل مميز (Featured)'
-        : p.upgrades?.urgent
-          ? 'عميل عاجل (Urgent)'
-          : 'عميل دولي (Freelancer)';
+      const completionRate =
+        typeof ownerUser?.employer_reputation?.completion_rate === 'number'
+          ? Math.round(ownerUser.employer_reputation.completion_rate * 100)
+          : typeof ownerUser?.reputation?.completion_rate === 'number'
+            ? Math.round(ownerUser.reputation.completion_rate * 100)
+            : null;
+
+      // Extract native category and skills array from official Freelancer API
+      const primaryCategory = p.jobs?.[0]?.category?.name || null;
+      const jobSkills: string[] = (p.jobs || []).map((j: any) => j.name).filter(Boolean);
+
+      const classResult = classifyProject({
+        platform: 'freelancer',
+        title: p.title,
+        description,
+        rawCategory: primaryCategory || categorySlug,
+        skills: jobSkills,
+      });
+
+      const detectedCountry =
+        ownerUser?.location?.country?.name ||
+        p.location?.country?.name ||
+        null;
+
+      const authorName =
+        ownerUser?.username ||
+        (p.upgrades?.featured
+          ? 'عميل مميز (Featured)'
+          : p.upgrades?.urgent
+            ? 'عميل عاجل (Urgent)'
+            : 'عميل دولي (Freelancer)');
+
+      const bidsCount = typeof p.bid_stats?.bid_count === 'number' ? p.bid_stats.bid_count : null;
 
       results.push(
         createUnifiedProject({
@@ -100,33 +145,29 @@ export async function scrapeFreelancerCategory(
           budget_max: max,
           currency,
           language: 'en',
-          category: cat,
+          category: classResult.category,
+          raw_category: primaryCategory,
+          raw_skills: jobSkills.length > 0 ? jobSkills : null,
           published_at: p.submitdate ? new Date(p.submitdate * 1000).toISOString() : new Date().toISOString(),
           author: authorName,
           insights: {
             job_type: p.type === 'hourly' ? 'hourly' : p.type === 'fixed' ? 'fixed' : null,
-            bids_count: typeof p.bid_stats?.bid_count === 'number' ? p.bid_stats.bid_count : null,
+            bids_count: bidsCount,
             // bid_avg is in the project's currency; store it in USD like budget_usd_estimate
             bids_avg: typeof p.bid_stats?.bid_avg === 'number'
               ? estimateBudgetUsd(Math.round(p.bid_stats.bid_avg), currency)
               : null,
             client_country: detectedCountry,
-            payment_verified: Boolean(
-              p.is_escrow_project ||
-              p.active_prepaid_milestone ||
-              p.upgrades?.active_prepaid_milestone ||
-              p.upgrades?.featured ||
-              p.upgrades?.urgent ||
-              p.upgrades?.recruiter ||
-              p.upgrades?.NDA ||
-              p.upgrades?.sealed
-            ),
+            client_rating: clientRating,
+            client_hire_rate: completionRate,
+            payment_verified: isPaymentVerified,
+            details_fetched_at: new Date().toISOString(),
           },
         })
       );
     }
 
-    console.log(`[Freelancer Scraper] Extracted ${results.length} live projects for #${categorySlug}`);
+    console.log(`[Freelancer Scraper] Extracted ${results.length} live projects with full details for #${categorySlug}`);
     return results;
   } catch (err: any) {
     console.error(`[Freelancer Scraper] Error querying API:`, err.message);

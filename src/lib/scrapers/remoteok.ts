@@ -5,7 +5,8 @@
 // ==============================================================================
 
 import { UnifiedProject, createUnifiedProject, ProjectCategory } from './types';
-import { classifyProjectCategory, extractCleanBudget, isCategoryMatch } from '../filters/categorizer';
+import { isCategoryMatch } from '../filters/categorizer';
+import { classifyProject } from '../taxonomy';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36';
 
@@ -41,13 +42,17 @@ export async function scrapeRemoteOkCategory(
       const job = data[i];
       if (!job || !job.id || !job.position) continue;
 
-      const tags: string = Array.isArray(job.tags) ? job.tags.join(' ') : '';
-      const fullText = `${job.position} ${tags} ${(job.description || '').replace(/<[^>]*>/g, '')}`;
+      const jobSkills: string[] = Array.isArray(job.tags) ? job.tags : [];
 
-      // Classify on title + tags only: RemoteOK descriptions are long company boilerplate
-      // that pushed almost every job into ai_data_automation
-      const cat = classifyProjectCategory(`${job.position} ${tags}`);
-      if (categorySlug !== 'all' && !isCategoryMatch(cat, categorySlug)) continue;
+      // Classify with 3-Layer Master Taxonomy using Position + Tags
+      const classResult = classifyProject({
+        platform: 'remoteok',
+        title: job.position,
+        description: (job.description || '').slice(0, 500),
+        skills: jobSkills,
+      });
+
+      if (categorySlug !== 'all' && !isCategoryMatch(classResult.category, categorySlug)) continue;
 
       const title = `${job.company ? `${job.company}: ` : ''}${job.position}`;
       // The API double-escapes newlines: descriptions contain literal "\n" sequences
@@ -89,7 +94,8 @@ export async function scrapeRemoteOkCategory(
           budget_max: budgetMax,
           currency: 'USD',
           language: 'en',
-          category: cat,
+          category: classResult.category,
+          raw_skills: jobSkills.length > 0 ? jobSkills : null,
           published_at: job.date ? new Date(job.date).toISOString() : new Date().toISOString(),
           author: job.company || 'Remote Employer',
         })
