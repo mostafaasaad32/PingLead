@@ -151,13 +151,13 @@ export default function JobFiltersWorkspace() {
   // Search within loaded matches
   const [workspaceSearch, setWorkspaceSearch] = useState("");
 
-  // Accordion Expand/Collapse States
+  // Accordion Expand/Collapse States (جميع الأقسام مقفولة افتراضياً ويفتحها المستخدم حسب الحاجة)
   const [openSections, setOpenSections] = useState({
-    keywords: true,
-    budget: true,
+    keywords: false,
+    budget: false,
     quality: false,
     ai: false,
-    sites: true,
+    sites: false,
     advanced: false,
   });
 
