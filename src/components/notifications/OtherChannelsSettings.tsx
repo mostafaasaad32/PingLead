@@ -23,7 +23,8 @@ const DIGEST_OPTIONS: { id: Digest; label: string; hint: string }[] = [
 export default function OtherChannelsSettings({ onToast }: { onToast: (msg: string) => void }) {
   // Browser push
   const [pushSupported, setPushSupported] = useState<boolean | null>(null);
-  const [pushConfigured, setPushConfigured] = useState(true);
+  // Off until the server confirms the channel is set up: unconfigured channels stay hidden
+  const [pushConfigured, setPushConfigured] = useState(false);
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [permission, setPermission] = useState<NotificationPermission>("default");
   const [subscribedHere, setSubscribedHere] = useState(false);
@@ -31,7 +32,7 @@ export default function OtherChannelsSettings({ onToast }: { onToast: (msg: stri
   const [pushBusy, setPushBusy] = useState(false);
 
   // Email
-  const [emailConfigured, setEmailConfigured] = useState(true);
+  const [emailConfigured, setEmailConfigured] = useState(false);
   const [digest, setDigest] = useState<Digest>("off");
   const [email, setEmail] = useState<string | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
@@ -209,7 +210,8 @@ export default function OtherChannelsSettings({ onToast }: { onToast: (msg: stri
         </div>
       )}
 
-      {/* Browser notifications */}
+      {/* Browser notifications (only once VAPID keys are set on the server) */}
+      {pushConfigured && (
       <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl space-y-3">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -236,10 +238,6 @@ export default function OtherChannelsSettings({ onToast }: { onToast: (msg: stri
               المتصفح ده مش بيدعم الإشعارات. على الآيفون: افتح الموقع من Safari، ودوس مشاركة ← «إضافة إلى الشاشة الرئيسية»، وافتحه من
               الأيقونة.
             </span>
-          </p>
-        ) : !pushConfigured ? (
-          <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-            إشعارات المتصفح لسه مش متفعّلة على السيرفر.
           </p>
         ) : permission === "denied" ? (
           <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -281,8 +279,10 @@ export default function OtherChannelsSettings({ onToast }: { onToast: (msg: stri
           </div>
         )}
       </div>
+      )}
 
-      {/* Email digest */}
+      {/* Email digest (only once Resend is set on the server) */}
+      {emailConfigured && (
       <div className="vollna-card p-5 bg-white border border-slate-200 rounded-2xl space-y-3">
         <div>
           <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
@@ -301,11 +301,7 @@ export default function OtherChannelsSettings({ onToast }: { onToast: (msg: stri
           </p>
         </div>
 
-        {!emailConfigured ? (
-          <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-            إرسال الإيميل لسه مش متفعّل على السيرفر.
-          </p>
-        ) : (
+        {(
           <fieldset className="flex flex-wrap gap-2" disabled={emailBusy}>
             <legend className="sr-only">عدد مرات الملخص</legend>
             {DIGEST_OPTIONS.map((o) => (
@@ -332,6 +328,7 @@ export default function OtherChannelsSettings({ onToast }: { onToast: (msg: stri
           </fieldset>
         )}
       </div>
+      )}
     </>
   );
 }

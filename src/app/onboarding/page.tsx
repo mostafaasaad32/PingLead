@@ -192,7 +192,7 @@ export default function OnboardingPage() {
               <div>
                 <h1 className="text-xl font-black text-slate-900">إيه مهاراتك؟</h1>
                 <p className="text-xs text-slate-500 mt-1">
-                  هنبعتلك بس المشاريع اللي فيها مهارة واحدة على الأقل منهم. وهيستخدمها الـ AI كمان وهو بيكتب عروضك.
+                  الـ AI هيستخدمها وهو بيكتب عروضك. مش هتقلّل المشاريع اللي بتوصلك: هيوصلك كل مشاريع تخصصك.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -337,8 +337,12 @@ export default function OnboardingPage() {
                   </dd>
                 </div>
                 <div className="flex justify-between gap-4 p-3">
-                  <dt className="text-slate-500">الكلمات</dt>
-                  <dd className="font-bold text-slate-900 text-left">{skills.length ? skills.join("، ") : "كل المشاريع في التخصص"}</dd>
+                  <dt className="text-slate-500">المشاريع</dt>
+                  <dd className="font-bold text-slate-900 text-left">كل المشاريع الجديدة في تخصصك</dd>
+                </div>
+                <div className="flex justify-between gap-4 p-3">
+                  <dt className="text-slate-500">مهاراتك (للعروض)</dt>
+                  <dd className="font-bold text-slate-900 text-left">{skills.length ? skills.join("، ") : "—"}</dd>
                 </div>
                 <div className="flex justify-between gap-4 p-3">
                   <dt className="text-slate-500">المنصات</dt>

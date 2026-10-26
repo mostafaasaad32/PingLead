@@ -167,7 +167,7 @@ export default function DashboardFilters({
           }`}
         >
           <Shield className={`w-3 h-3 ${hideRiskyClients ? "text-emerald-400 fill-emerald-400/20" : "text-slate-500"}`} />
-          <span>إخفاء العملاء الوهميين (أعلى من 6/10 فقط)</span>
+          <span>إخفاء العملاء الأقل تقييماً (6/10 أو أكتر بس)</span>
           {hideRiskyClients && (
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ms-0.5" />
           )}

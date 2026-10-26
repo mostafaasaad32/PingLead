@@ -752,7 +752,7 @@ function generateNegotiationTip(params: {
 /**
  * Returns tailored badge UI properties (colors, borders, icons)
  */
-export function getClientBadgeStyles(score: number | null, isCorporate?: boolean) {
+export function getClientBadgeStyles(score: number | null, isCorporate?: boolean, hasHistory: boolean = true) {
   if (isCorporate) {
     return {
       bg: "bg-purple-50 dark:bg-purple-950/40",
@@ -771,6 +771,17 @@ export function getClientBadgeStyles(score: number | null, isCorporate?: boolean
       accent: "bg-slate-500",
       icon: "👤",
       title: "بيانات العميل",
+    };
+  }
+  // No hire rate / rating: the score only reflects the post, so don't label the client
+  if (!hasHistory) {
+    return {
+      bg: "bg-slate-50 dark:bg-slate-900/40",
+      border: "border-slate-200 dark:border-slate-800/60",
+      text: "text-slate-700 dark:text-slate-300",
+      accent: "bg-slate-500",
+      icon: "👤",
+      title: "عميل من غير سجل",
     };
   }
   if (score >= 8.0) {

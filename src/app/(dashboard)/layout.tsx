@@ -27,6 +27,9 @@ export default function DashboardLayout({
         <div className="flex-1 overflow-hidden bg-white">
           {children}
         </div>
+
+        {/* Beta feedback ("رأيك") */}
+        <FeedbackButton />
       </div>
     );
   }

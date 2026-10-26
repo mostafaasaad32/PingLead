@@ -243,7 +243,11 @@ function ClientIntelligenceCard({
   platform?: string;
 }) {
   const isCorp = Boolean(evaluation.isCorporateJob || ['baeed', 'remoteok', 'wwr'].includes(platform || evaluation.platform || ""));
-  const styles = getClientBadgeStyles(evaluation.score, isCorp);
+  const styles = getClientBadgeStyles(
+    evaluation.score,
+    isCorp,
+    evaluation.hireRate !== undefined || evaluation.clientRating !== undefined
+  );
   const targetPlatform = platform || evaluation.platform || "";
   const chips =
     evaluation.metricsChips && evaluation.metricsChips.length > 0
@@ -438,7 +442,11 @@ function ClientScorePill({ data }: { data: any }) {
   }
 
   const isCorp = Boolean(evaluation.isCorporateJob || ['baeed', 'remoteok', 'wwr'].includes(data?.platform));
-  const styles = getClientBadgeStyles(evaluation.score, isCorp);
+  const styles = getClientBadgeStyles(
+    evaluation.score,
+    isCorp,
+    evaluation.hireRate !== undefined || evaluation.clientRating !== undefined
+  );
 
   // 2. Corporate job board: Clear company job badge without 10-point scale
   if (isCorp) {
@@ -601,7 +609,9 @@ export default function DashboardPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Sync state
-  const [lastSyncTime, setLastSyncTime] = useState<Date>(new Date());
+  // Set on the first fetch in the browser: a server-rendered time (UTC) never matched the
+  // client's (React hydration error #418)
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [scanning, setScanning] = useState(false);
   const [countdown, setCountdown] = useState(15);
   const [autoSync, setAutoSync] = useState(true);
@@ -1057,7 +1067,7 @@ export default function DashboardPage() {
         {/* Action Controls: Last sync, Refresh button & Export (Compact h-8) */}
         <div className="flex items-center gap-2 text-xs text-slate-500 self-start sm:self-auto shrink-0">
           <span className="hidden md:inline text-[11px] text-slate-400">
-            آخر سحب: {lastSyncTime.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}
+            آخر سحب: {lastSyncTime ? lastSyncTime.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" }) : "…"}
           </span>
 
           <button

@@ -69,7 +69,10 @@ export async function POST(req: NextRequest) {
       filter_name: `${firstLabel}${categories.length > 1 ? ` +${categories.length - 1}` : ""}`,
       platforms: [], // every freelance platform; job boards stay opt-in
       categories,
-      include_keywords: skills,
+      // Skills go to the profile (used for proposals), not the filter: as required keywords they
+      // left a new user's first filter with almost no matches (an e2e test got 0 of ~190 programming
+      // projects for "ووردبريس"). Narrowing is left to the filter page / AI criteria.
+      include_keywords: [],
       exclude_keywords: [],
       min_budget_usd: Math.max(0, Number(body.min_budget_usd) || 0),
       is_active: true,

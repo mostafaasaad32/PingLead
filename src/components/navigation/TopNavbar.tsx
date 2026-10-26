@@ -142,7 +142,7 @@ export default function TopNavbar() {
     },
     {
       name: "Profile Audit",
-      labelAr: "Profile Audit",
+      labelAr: "تقييم البروفايل",
       href: "/profile-audit",
       icon: Sparkles,
       isActive: pathname.startsWith("/profile-audit"),
@@ -173,7 +173,7 @@ export default function TopNavbar() {
               <span className="font-extrabold text-base tracking-tight text-slate-900 flex items-center gap-1.5">
                 PingLead
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                  PRO
+                  Beta
                 </span>
               </span>
             </Link>
