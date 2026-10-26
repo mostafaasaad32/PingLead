@@ -1,8 +1,11 @@
+"use client";
+
 // ==============================================================================
 // src/app/(dashboard)/layout.tsx
 // Vollna-Style Responsive Dashboard Layout with Master Top Navbar
 // ==============================================================================
 
+import { usePathname } from "next/navigation";
 import TopNavbar from "@/components/navigation/TopNavbar";
 
 export default function DashboardLayout({
@@ -10,6 +13,23 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
+  const isFiltersPage = pathname?.startsWith("/filters");
+
+  if (isFiltersPage) {
+    return (
+      <div className="h-screen bg-white text-slate-900 flex flex-col font-sans selection:bg-emerald-100 selection:text-emerald-900 overflow-hidden">
+        {/* Master Top Navigation Bar (Vollna Layout, fixed h-12 = 48px) */}
+        <TopNavbar />
+
+        {/* Full-bleed Edge-to-Edge Split Workspace */}
+        <div className="flex-1 overflow-hidden bg-white">
+          {children}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col font-sans selection:bg-emerald-100 selection:text-emerald-900">
       {/* Master Top Navigation Bar (Vollna Layout) */}

@@ -342,6 +342,9 @@ def scrape_mostaql(req: MostaqlRequest):
 
         logger.info(f"Successfully scraped {len(jobs)} projects from Mostaql.")
         return jobs
+    except Exception as e:
+        logger.error(f"Error scraping Mostaql: {str(e)}")
+        return []
 
 # ------------------------------------------------------------------------------
 # 4. Khamsat Endpoint (/scrape/khamsat)

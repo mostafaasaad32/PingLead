@@ -27,8 +27,9 @@ const childEnv = { ...process.env, LOCAL_INGEST: ingest ? "1" : "0" };
 
 const children = [];
 
-function run(name, command, args) {
-  const child = spawn(command, args, { stdio: "inherit", shell: true, env: childEnv });
+function run(name, command, args = []) {
+  const cmd = args.length > 0 ? `${command} ${args.join(" ")}` : command;
+  const child = spawn(cmd, { stdio: "inherit", shell: true, env: childEnv });
   children.push(child);
   child.on("exit", (code) => {
     if (name === "web") shutdown(code ?? 0);
