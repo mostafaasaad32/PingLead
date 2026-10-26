@@ -52,7 +52,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/insights") ||
     pathname.startsWith("/tracker") ||
     pathname.startsWith("/settings") ||
-    pathname.startsWith("/onboarding");
+    pathname.startsWith("/onboarding") ||
+    pathname.startsWith("/admin");
 
   // Authentication paths
   const isAuthPath = pathname === "/login" || pathname === "/signup";

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getOrEnsureFreelancerProfile } from "@/lib/supabase/profile";
+import ExtensionKeyCard from "@/components/settings/ExtensionKeyCard";
 
 export default function MyProfilePage() {
   const router = useRouter();
@@ -407,6 +408,9 @@ export default function MyProfilePage() {
           </div>
         </form>
       </div>
+
+      {/* Browser extension key */}
+      <ExtensionKeyCard />
 
       {/* Danger Zone */}
       <div className="vollna-card p-6 bg-white border border-red-200 rounded-2xl shadow-xs">

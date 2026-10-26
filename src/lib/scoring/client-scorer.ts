@@ -415,18 +415,19 @@ export function calculateClientScore(jobData: ClientJobData | any): ClientEvalua
       isCorporateJob: true,
       badge: "corporate",
       labelAr: "🏢 وظيفة شركة عن بُعد",
-      paymentVerified: true,
+      // Job boards publish nothing about the employer's payment method
+      paymentVerified: false,
       clientCountry,
       platform,
       metricsChips: buildPlatformMetricsChips({
         platform,
-        paymentVerified: true,
+        paymentVerified: false,
         clientCountry,
         score: null,
       }),
       redFlags: [],
       greenFlags: [
-        "وظيفة شركة عن بُعد بمواصفات رسمية",
+        "وظيفة عن بُعد عند شركة (مش مشروع فريلانس)",
         "التعاقد والراتب يخضع لسياسة الشركة المباشرة"
       ],
       negotiationTipAr: "شركة تبحث عن محترف طويل الأمد؛ ركز في خطابك على سنوات خبرتك ومشاريعك السابقة الموثقة والتزامك بالمواعيد."
@@ -505,7 +506,7 @@ export function calculateClientScore(jobData: ClientJobData | any): ClientEvalua
     score += 1.0;
     if (clientCountry) {
       score += 0.5;
-      greenFlags.push(`عميل دولي موثق من: ${clientCountry}`);
+      greenFlags.push(`العميل من: ${clientCountry}`); // a stated country is not verification
     }
     greenFlags.push("التعاقد خاضع لنظام الحماية والإيداع البنكي المعتمد في PeoplePerHour");
   } else if (isKafiil) {
@@ -617,7 +618,7 @@ export function calculateClientScore(jobData: ClientJobData | any): ClientEvalua
     // If no numeric hire rate or review history, don't show a fake 7.0/10 score
     finalScore = null;
     badge = "good";
-    labelAr = "عميل دولي موثق (PeoplePerHour)";
+    labelAr = "عميل على PeoplePerHour - مفيش سجل كافي عنه";
   } else {
     const NO_HISTORY_CAP = 7.0;
     finalScore = Math.min(10.0, Math.max(1.0, Math.round(score * 10) / 10));

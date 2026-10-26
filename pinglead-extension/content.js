@@ -5,7 +5,7 @@
 // ==============================================================================
 
 (function () {
-  const DEFAULT_SERVER_URL = "http://localhost:3000";
+  const DEFAULT_SERVER_URL = "https://ping-lead.vercel.app";
 
   // Prevent duplicate injections
   if (document.getElementById("pinglead-copilot-root")) return;
@@ -361,38 +361,43 @@
 
     // Get settings from chrome storage if available
     if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.sync) {
-      chrome.storage.sync.get(["userId", "serverUrl"], (settings) => {
+      chrome.storage.sync.get(["apiKey", "serverUrl"], (settings) => {
         const serverUrl = settings.serverUrl || DEFAULT_SERVER_URL;
-        sendAnalyzeRequest(serverUrl, settings.userId, jobData);
+        sendAnalyzeRequest(serverUrl, settings.apiKey, jobData);
       });
     } else {
       sendAnalyzeRequest(DEFAULT_SERVER_URL, null, jobData);
     }
   }
 
-  function sendAnalyzeRequest(serverUrl, userId, jobData) {
+  function sendAnalyzeRequest(serverUrl, apiKey, jobData) {
     const endpoint = `${serverUrl.replace(/\/$/, "")}/api/extension/analyze`;
+
+    if (!apiKey) {
+      renderCardError("حط مفتاح الإضافة الأول: من PingLead ← الإعدادات ← الملف الشخصي، وبعدها في إعدادات الإضافة.");
+      return;
+    }
 
     fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        userId,
-        ...jobData,
-      }),
+      body: JSON.stringify(jobData),
     })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        return res.json();
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        // 401 (bad key) and 402 (out of credits) carry a message for the user
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        return data;
       })
       .then((data) => {
         if (!data.success && data.error) throw new Error(data.error);
         renderCardResult(data);
       })
       .catch((err) => {
-        renderCardError(`تعذر الاتصال بخادم PingLead (${err.message}). تأكد من تشغيل الموقع.`);
+        renderCardError(err.message || "تعذر الاتصال بخادم PingLead.");
       });
   }
 

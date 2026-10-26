@@ -36,6 +36,11 @@ import {
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // Max execution time for serverless/Edge
 
+// The auto-bidding queue page was removed (it redirects to the dashboard), so queued projects
+// can't be acted on and its Telegram message would point to a dead page. Every match already
+// gets a regular alert with an AI-proposal button. Re-enable together with a queue UI.
+const AUTO_BIDDING_ENABLED = false;
+
 // Max time the AI qualifier may hold up a cycle's alerts
 const QUALIFIER_BUDGET_MS = 6000;
 
@@ -429,7 +434,7 @@ export async function GET(req: NextRequest) {
       // Awaited: on Vercel un-awaited work can be frozen as soon as the response is sent
       const newProjectIds = new Set(newActions.map((a) => a.project_id));
       const autoBidJobs: Promise<unknown>[] = [];
-      for (const item of items) {
+      for (const item of AUTO_BIDDING_ENABLED ? items : []) {
         const projectId = projectIdByKey.get(`${item.project.platform}_${item.project.external_id}`);
         if (!projectId || !newProjectIds.has(projectId)) continue;
         autoBidJobs.push(
