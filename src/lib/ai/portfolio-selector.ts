@@ -20,96 +20,79 @@ export interface ProjectContext {
   category?: ProjectCategory | string;
 }
 
+// Words too common in project text to show that a work item is related
+const STOPWORDS = new Set([
+  'مشروع', 'المشروع', 'تطوير', 'تصميم', 'عمل', 'العمل', 'مطلوب', 'احتاج', 'نحتاج', 'خدمة', 'موقع', 'تطبيق', 'كامل',
+  'project', 'website', 'design', 'develop', 'development', 'need', 'looking', 'work', 'with', 'that', 'this', 'from',
+  'have', 'will', 'your', 'about', 'using', 'build', 'create', 'simple', 'professional',
+]);
+
+/** Below this an item isn't cited at all: a wrong reference hurts more than none */
+const MIN_RELEVANCE = 20;
+
 /**
- * Selects the top 1 or 2 most relevant portfolio items for a given freelance project.
- * Scores based on category alignment, shared tech tags, conceptual relevance, and live link presence.
+ * Selects the top 1 or 2 portfolio items that are actually related to the project.
+ * Evidence: shared skill tags, the item's title in the project text, or at least two
+ * meaningful description words in common. A live link only adds weight to an item that
+ * is already related, and the item's stored category isn't used (it was "web_dev" for
+ * every item, so it matched every programming project).
  */
 export function selectBestPortfolioItems(
   project: ProjectContext,
   portfolioItems: PortfolioItem[],
   maxItems: number = 2
 ): ScoredPortfolioItem[] {
-  if (!portfolioItems || portfolioItems.length === 0) {
-    return [];
-  }
+  if (!portfolioItems || portfolioItems.length === 0) return [];
 
-  const combinedProjectText = `${project.title || ''} ${project.description || ''}`;
-  const normalizedProjectText = normalizeText(combinedProjectText);
+  const normalizedProjectText = normalizeText(`${project.title || ''} ${project.description || ''}`);
   const scoredItems: ScoredPortfolioItem[] = [];
 
   for (const item of portfolioItems) {
     let score = 0;
     const matchReasons: string[] = [];
 
-    // 1. Category Alignment (+15 points)
-    if (project.category && item.category) {
-      if (item.category.toLowerCase() === project.category.toLowerCase()) {
-        score += 15;
-        matchReasons.push(`نفس التصنيف البرمجي (${item.category})`);
-      }
-    }
-
-    // 2. Shared Tech Tags (+20 points per matched tag)
+    // 1. Shared tags (+20 each)
     if (Array.isArray(item.tags) && item.tags.length > 0) {
-      const matchedTags: string[] = [];
-      for (const tag of item.tags) {
-        if (matchesKeyword(normalizedProjectText, tag)) {
-          score += 20;
-          matchedTags.push(tag);
-        }
-      }
+      const matchedTags = item.tags.filter((tag) => tag && tag.length >= 2 && matchesKeyword(normalizedProjectText, tag));
       if (matchedTags.length > 0) {
-        matchReasons.push(`وسوم تقنية مشتركة: [${matchedTags.join(', ')}]`);
+        score += 20 * matchedTags.length;
+        matchReasons.push(`مهارات مشتركة: [${matchedTags.join(', ')}]`);
       }
     }
 
-    // 3. Project Title Keyword Relevance (+15 points)
+    // 2. The item's title appears in the project text (+15)
     if (item.project_title && matchesKeyword(normalizedProjectText, item.project_title)) {
       score += 15;
       matchReasons.push(`تطابق في عنوان العمل: "${item.project_title}"`);
     }
 
-    // 4. Conceptual Description Keyword Overlap (+3 points per keyword, max 15)
+    // 3. Meaningful description words in common (+5 each, counted only from 2 words, max 25)
     if (item.description) {
-      const words = item.description
-        .split(/\s+/)
-        .map((w) => w.replace(/[^\w\u0600-\u06FF]/g, '').trim())
-        .filter((w) => w.length >= 4);
-
-      const uniqueWords = Array.from(new Set(words));
-      let overlapCount = 0;
-
-      for (const word of uniqueWords) {
-        if (matchesKeyword(normalizedProjectText, word)) {
-          overlapCount++;
-          if (overlapCount <= 5) score += 3;
-        }
-      }
-
-      if (overlapCount > 0) {
-        matchReasons.push(`تطابق مفاهيمي في الوصف (${overlapCount} كلمات رئيسية)`);
+      const words = Array.from(
+        new Set(
+          item.description
+            .split(/\s+/)
+            .map((w) => w.replace(/[^\w؀-ۿ]/g, '').trim())
+            .filter((w) => w.length >= 4 && !STOPWORDS.has(w.toLowerCase()))
+        )
+      );
+      const overlap = words.filter((w) => matchesKeyword(normalizedProjectText, w));
+      if (overlap.length >= 2) {
+        score += Math.min(25, overlap.length * 5);
+        matchReasons.push(`كلمات مشتركة في الوصف (${overlap.slice(0, 5).join('، ')})`);
       }
     }
 
-    // 5. Live URL Bonus (+10 points for verifiable proof)
-    if (item.live_url && item.live_url.startsWith('http')) {
+    // 4. A live link helps only an item that is already related (+10)
+    if (score > 0 && item.live_url && item.live_url.startsWith('http')) {
       score += 10;
-      matchReasons.push('رابط حي متاح للمعاينة المباشرة');
+      matchReasons.push('رابط متاح للمعاينة');
     }
 
-    // If item has any positive relevance, add to pool
-    if (score > 0) {
-      scoredItems.push({
-        item,
-        score,
-        matchReasons,
-      });
-    }
+    if (score >= MIN_RELEVANCE) scoredItems.push({ item, score, matchReasons });
   }
 
-  // Sort by score descending
   scoredItems.sort((a, b) => b.score - a.score);
-
   return scoredItems.slice(0, maxItems);
 }
 
@@ -119,7 +102,7 @@ export function selectBestPortfolioItems(
  */
 export function formatPortfolioForPrompt(selectedItems: ScoredPortfolioItem[]): string {
   if (!selectedItems || selectedItems.length === 0) {
-    return 'No specific portfolio links available. Rely on freelancer bio and skills.';
+    return 'WORK ITEMS: none related to this project. Do not mention any past work or links.';
   }
 
   const itemsFormatted = selectedItems
@@ -132,7 +115,7 @@ export function formatPortfolioForPrompt(selectedItems: ScoredPortfolioItem[]): 
     .join('\n\n');
 
   return `
-RELEVANT PORTFOLIO PROOF OF WORK (Select and cite the most relevant one naturally in the proposal with its link as tangible proof):
+WORK ITEMS related to this project (you may mention the most relevant one, in one plain sentence with its link):
 ${itemsFormatted}
 `.trim();
 }
