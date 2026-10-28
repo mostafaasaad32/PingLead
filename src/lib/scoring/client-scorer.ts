@@ -453,6 +453,10 @@ export function calculateClientScore(jobData: ClientJobData | any): ClientEvalua
       } else if (hireRate > 0 && hireRate < 25) {
         score -= 2.5;
         redFlags.push(`⚠️ خطر تضييع الوقت: العميل ينشر مشاريع ونادراً ما يوظف (معدل توظيف ${hireRate}%)`);
+      } else if (hireRate === 0) {
+        // Mostaql shows 0% only after earlier projects that ended without hiring anyone
+        score -= 2.0;
+        redFlags.push("⚠️ العميل نشر مشاريع قبل كده ولسه موظفش حد فيها (معدل توظيف 0%)");
       }
     } else {
       score += 0.5; // clean new opportunity on Mostaql
@@ -609,7 +613,16 @@ export function calculateClientScore(jobData: ClientJobData | any): ClientEvalua
   // 3. Clamping Score: between 1.0 and 10.0 (rounded to 1 decimal place).
   // Without any client history (hire rate or rating) a clear post can't make a client
   // "excellent": the score is capped, so the badge reflects what we actually know.
-  const hasHistory = hireRate !== undefined || clientRating !== undefined;
+  // Any real data about the client counts as history (Mostaql often gives open / in-progress
+  // projects or a registration date without a hire rate)
+  const hasHistory =
+    hireRate !== undefined ||
+    clientRating !== undefined ||
+    typeof openProjects === "number" ||
+    typeof inProgressProjects === "number" ||
+    Boolean(totalSpent) ||
+    paymentVerified ||
+    Boolean(jobData.client_registered_at ?? jobData.insights?.client_registered_at);
   let finalScore: number | null = null;
   let badge: ClientEvaluation["badge"] = "good";
   let labelAr = "عميل متوسط - فرصة مناسبة";
@@ -621,8 +634,13 @@ export function calculateClientScore(jobData: ClientJobData | any): ClientEvalua
     labelAr = "عميل على PeoplePerHour - مفيش سجل كافي عنه";
   } else {
     const NO_HISTORY_CAP = 7.0;
+    const UNPROVEN_CAP = 7.4;
     finalScore = Math.min(10.0, Math.max(1.0, Math.round(score * 10) / 10));
     if (!hasHistory) finalScore = Math.min(finalScore, NO_HISTORY_CAP);
+    // "Trusted" needs evidence that the client actually hires: a clear post or a registration
+    // date alone gave 0%-hire-rate clients 9/10 ("عميل موثوق")
+    const provenHirer = (hireRate ?? -1) >= 40 || (clientRating ?? 0) >= 4.5;
+    if (!provenHirer) finalScore = Math.min(finalScore, UNPROVEN_CAP);
 
     // 4. Badges & Labels: only claim what the data shows
     if (finalScore >= 8.0) {

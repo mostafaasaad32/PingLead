@@ -246,7 +246,12 @@ function ClientIntelligenceCard({
   const styles = getClientBadgeStyles(
     evaluation.score,
     isCorp,
-    evaluation.hireRate !== undefined || evaluation.clientRating !== undefined
+    evaluation.hireRate !== undefined ||
+      evaluation.clientRating !== undefined ||
+      typeof evaluation.openProjects === "number" ||
+      typeof evaluation.inProgressProjects === "number" ||
+      Boolean(evaluation.totalSpent) ||
+      evaluation.paymentVerified
   );
   const targetPlatform = platform || evaluation.platform || "";
   const chips =
@@ -445,7 +450,12 @@ function ClientScorePill({ data }: { data: any }) {
   const styles = getClientBadgeStyles(
     evaluation.score,
     isCorp,
-    evaluation.hireRate !== undefined || evaluation.clientRating !== undefined
+    evaluation.hireRate !== undefined ||
+      evaluation.clientRating !== undefined ||
+      typeof evaluation.openProjects === "number" ||
+      typeof evaluation.inProgressProjects === "number" ||
+      Boolean(evaluation.totalSpent) ||
+      evaluation.paymentVerified
   );
 
   // 2. Corporate job board: Clear company job badge without 10-point scale
@@ -657,7 +667,12 @@ export default function DashboardPage() {
     try {
       // The feed is the whole market; AI-scored matches can be older than the latest 100
       const limit = onlyAiFit ? 400 : 100;
-      const res = await fetch(`/api/leads?limit=${limit}&time_window=${timeWindow}&sort_by=${sortBy}`);
+      // Platform and specialty are filtered by the server: filtering only the latest 100 leads
+      // (mostly Freelancer) left e.g. Mostaql empty although it had ~90 projects that day
+      const params = new URLSearchParams({ limit: String(limit), time_window: timeWindow, sort_by: sortBy });
+      if (selectedPlatform !== "all") params.set("platform", selectedPlatform);
+      if (selectedCategory !== "all") params.set("category", selectedCategory);
+      const res = await fetch(`/api/leads?${params.toString()}`);
       const data = await res.json();
       if (data.ok && Array.isArray(data.leads)) {
         setLeads(data.leads);
@@ -723,7 +738,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchLeads(false);
-  }, [timeWindow, sortBy, onlyAiFit]);
+  }, [timeWindow, sortBy, onlyAiFit, selectedPlatform, selectedCategory]);
 
   useEffect(() => {
     fetchActions();
@@ -743,7 +758,7 @@ export default function DashboardPage() {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [autoSync, timeWindow, sortBy, onlyAiFit]);
+  }, [autoSync, timeWindow, sortBy, onlyAiFit, selectedPlatform, selectedCategory]);
 
   // Handle Manual Scan Trigger
   const handleScanNow = async () => {
