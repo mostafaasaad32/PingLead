@@ -43,6 +43,10 @@ export async function POST(req: NextRequest) {
       freelancer_skills,
       tone_of_voice,
       custom_instructions,
+      template_id,
+      pitch_angle,
+      refinement_type,
+      existing_proposal,
     } = body;
 
     let targetProjectId = project_id || null;
@@ -167,6 +171,45 @@ export async function POST(req: NextRequest) {
     }
     const remainingCredits = credit.remaining;
 
+    // 4.2. Fetch Proposal Template if specified
+    let templateData: any = null;
+    if (template_id) {
+      const { data: tpl } = await (supabaseAdmin.from('proposal_templates') as any)
+        .select('*')
+        .eq('id', template_id)
+        .eq('user_id', effectiveUserId)
+        .maybeSingle();
+      templateData = tpl;
+    }
+
+    let effectiveCustomInstructions = custom_instructions || '';
+    if (templateData?.template_body) {
+      const tplPrompt = `الاستناد إلى هيكل وأسلوب هذا القالب في صياغة العرض:\n"""\n${templateData.template_body}\n"""`;
+      effectiveCustomInstructions = effectiveCustomInstructions
+        ? `${tplPrompt}\n\nتعليمات إضافية: ${effectiveCustomInstructions}`
+        : tplPrompt;
+    }
+    if (templateData?.sender_name) {
+      const senderPrompt = `اسم المستقل الموقع على العرض: ${templateData.sender_name}`;
+      effectiveCustomInstructions = effectiveCustomInstructions
+        ? `${effectiveCustomInstructions}\n${senderPrompt}`
+        : senderPrompt;
+    }
+
+    let effectivePricingHint = pricing ? pricingPromptHint(pricing) : undefined;
+    if (templateData?.hourly_rate) {
+      const rateHint = `سعر الساعة المعتمد للمستقل في هذا القالب: $${templateData.hourly_rate}/ساعة.`;
+      effectivePricingHint = effectivePricingHint
+        ? `${effectivePricingHint}\n${rateHint}`
+        : rateHint;
+    }
+
+    const writingSample =
+      (profile as any)?.writing_sample ||
+      (profile as any)?.persona_ar?.writing_sample ||
+      (profile as any)?.persona_en?.writing_sample ||
+      null;
+
     // 4.5. Generate proposal via context-aware AI engine
     let result;
     try {
@@ -178,10 +221,14 @@ export async function POST(req: NextRequest) {
         freelancerBio: effectiveBio,
         freelancerSkills: effectiveSkills,
         toneOfVoice: effectiveTone,
-        customInstructions: custom_instructions,
+        customInstructions: effectiveCustomInstructions || undefined,
         standingInstructions: (profile as any)?.proposal_instructions,
+        writingSample,
+        pitchAngle: pitch_angle || 'direct',
+        refinementType: refinement_type,
+        existingProposal: existing_proposal,
         portfolioItems,
-        pricingHint: pricing ? pricingPromptHint(pricing) : undefined,
+        pricingHint: effectivePricingHint,
       });
     } catch (err) {
       await refundAiCredit(effectiveUserId);
@@ -234,6 +281,8 @@ export async function POST(req: NextRequest) {
       ok: true,
       proposal: result.proposal,
       remaining_credits: remainingCredits,
+      template_used: templateData ? { id: templateData.id, name: templateData.name } : null,
+      pitch_angle: result.pitchAngle,
       selectedPortfolio: result.selectedPortfolio.map((sp) => ({
         id: sp.item.id,
         title: sp.item.project_title,

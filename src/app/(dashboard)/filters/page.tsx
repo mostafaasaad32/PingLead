@@ -35,6 +35,7 @@ import {
   Layers,
   ArrowUpDown,
   RotateCcw,
+  FileText,
 } from "lucide-react";
 
 import {
@@ -109,6 +110,10 @@ interface ProjectItem {
 interface ProposalTemplate {
   id: string;
   name: string;
+  template_body?: string | null;
+  hourly_rate?: number | null;
+  pricing_type?: string;
+  filter_id?: string | null;
 }
 
 export default function JobFiltersWorkspace() {
@@ -180,8 +185,15 @@ export default function JobFiltersWorkspace() {
   // AI Proposal Modal
   const [proposalModalProject, setProposalModalProject] = useState<ProjectItem | null>(null);
   const [generatingProposal, setGeneratingProposal] = useState(false);
+  const [refiningProposal, setRefiningProposal] = useState(false);
   const [generatedProposalText, setGeneratedProposalText] = useState("");
   const [copiedProposal, setCopiedProposal] = useState(false);
+  const [pitchAngle, setPitchAngle] = useState<"direct" | "action_plan" | "snappy">("direct");
+  const [selectedPortfolioItem, setSelectedPortfolioItem] = useState<{
+    id: string;
+    title: string;
+    live_url?: string | null;
+  } | null>(null);
 
   // CRM Tracker Notification State
   const [appliedProjectIds, setAppliedProjectIds] = useState<Set<string>>(new Set());
@@ -674,7 +686,14 @@ export default function JobFiltersWorkspace() {
     setProposalModalProject(project);
     setGeneratedProposalText("");
     setCopiedProposal(false);
+    setSelectedPortfolioItem(null);
+    setPitchAngle("direct");
+  };
+
+  const handleExecuteProposalGeneration = (project: ProjectItem, overrideAngle?: "direct" | "action_plan" | "snappy") => {
+    const angleToUse = overrideAngle || pitchAngle;
     setGeneratingProposal(true);
+    setCopiedProposal(false);
 
     fetch("/api/proposals/generate", {
       method: "POST",
@@ -683,12 +702,22 @@ export default function JobFiltersWorkspace() {
         project_id: project.id,
         project_title: project.title,
         project_description: project.description,
+        pitch_angle: angleToUse,
       }),
     })
       .then((res) => res.json())
       .then((data) => {
         if (data.ok && data.proposal) {
           setGeneratedProposalText(data.proposal);
+          if (data.selectedPortfolio && data.selectedPortfolio.length > 0) {
+            setSelectedPortfolioItem({
+              id: data.selectedPortfolio[0].id,
+              title: data.selectedPortfolio[0].title,
+              live_url: data.selectedPortfolio[0].live_url,
+            });
+          } else {
+            setSelectedPortfolioItem(null);
+          }
         } else {
           setGeneratedProposalText("⚠️ تعذر توليد العرض: " + (data.error || "حاول مرة أخرى"));
         }
@@ -699,6 +728,40 @@ export default function JobFiltersWorkspace() {
       .finally(() => {
         setGeneratingProposal(false);
       });
+  };
+
+  const handleRefineProposal = async (refinementType: "shorten" | "casual" | "change_question") => {
+    if (!proposalModalProject || !generatedProposalText || refiningProposal) return;
+    setRefiningProposal(true);
+    try {
+      const res = await fetch("/api/proposals/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: proposalModalProject.id,
+          project_title: proposalModalProject.title,
+          project_description: proposalModalProject.description,
+          pitch_angle: pitchAngle,
+          refinement_type: refinementType,
+          existing_proposal: generatedProposalText,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok && data.proposal) {
+        setGeneratedProposalText(data.proposal);
+        showToast(
+          refinementType === "shorten"
+            ? "تم اختصار العرض للنصف بنجاح ✂️"
+            : refinementType === "casual"
+            ? "تمت إعادة الصياغة بنبرة أكثر عفوية 💬"
+            : "تم تغيير السؤال الفني الختامي 🔄"
+        );
+      }
+    } catch (e) {
+      showToast("تعذر التعديل السريع، حاول مرة أخرى");
+    } finally {
+      setRefiningProposal(false);
+    }
   };
 
   const handleCopyProposal = () => {
@@ -1954,22 +2017,158 @@ export default function JobFiltersWorkspace() {
               </button>
             </div>
 
+            {/* Pitch Angle Selector Toolbar */}
+            <div className="p-3 mb-3 rounded-xl bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs font-black text-slate-800 shrink-0">الزاوية:</span>
+                <button
+                  type="button"
+                  onClick={() => setPitchAngle("direct")}
+                  disabled={generatingProposal || refiningProposal}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                    pitchAngle === "direct"
+                      ? "bg-emerald-600 text-white shadow-2xs"
+                      : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  <span>🎯 مباشر + سابقة أعمال</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPitchAngle("action_plan")}
+                  disabled={generatingProposal || refiningProposal}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                    pitchAngle === "action_plan"
+                      ? "bg-emerald-600 text-white shadow-2xs"
+                      : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  <span>🛠️ خطة عمل (1-2-3)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPitchAngle("snappy")}
+                  disabled={generatingProposal || refiningProposal}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                    pitchAngle === "snappy"
+                      ? "bg-emerald-600 text-white shadow-2xs"
+                      : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  <span>⚡ خاطف (4 أسطر)</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleExecuteProposalGeneration(proposalModalProject)}
+                disabled={generatingProposal || refiningProposal}
+                className="h-7 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-2xs shrink-0 disabled:opacity-50 cursor-pointer"
+              >
+                {generatingProposal ? (
+                  <>
+                    <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>جاري الصياغة...</span>
+                  </>
+                ) : generatedProposalText ? (
+                  <>
+                    <RotateCcw className="w-3 h-3 text-emerald-400" />
+                    <span>إعادة صياغة بهذه الزاوية</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3 h-3 text-emerald-400" />
+                    <span>صياغة العرض البشري</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             <div className="flex-1 overflow-y-auto mb-3">
               {generatingProposal ? (
                 <div className="py-14 text-center">
                   <div className="w-7 h-7 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
                   <p className="text-xs text-slate-600 font-bold">
-                    الذكاء الاصطناعي يقوم الآن بصياغة عرض احترافي مخصص...
+                    الذكاء الاصطناعي يقوم الآن بتشخيص طلب العميل وصياغة رد بشري مقنع...
                   </p>
                 </div>
+              ) : generatedProposalText ? (
+                <div className="space-y-2">
+                  <div className="relative">
+                    <textarea
+                      rows={9}
+                      value={generatedProposalText}
+                      onChange={(e) => setGeneratedProposalText(e.target.value)}
+                      dir="auto"
+                      disabled={refiningProposal}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 leading-relaxed focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans select-text disabled:opacity-60"
+                    />
+                    {refiningProposal && (
+                      <div className="absolute inset-0 bg-white/70 backdrop-blur-xs rounded-xl flex items-center justify-center gap-2 text-xs font-bold text-slate-700">
+                        <div className="w-4 h-4 border-2 border-slate-700 border-t-transparent rounded-full animate-spin" />
+                        <span>جاري التعديل البشري السريع...</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Portfolio Citation Badge */}
+                  {selectedPortfolioItem && (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-50 text-emerald-900 border border-emerald-200/80 text-xs font-bold">
+                      <Sparkles className="w-3 h-3 text-emerald-600 shrink-0" />
+                      <span>✨ تم ربط العرض بـ: </span>
+                      {selectedPortfolioItem.live_url ? (
+                        <a
+                          href={selectedPortfolioItem.live_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline hover:text-emerald-700 font-black inline-flex items-center gap-1"
+                        >
+                          <span>{selectedPortfolioItem.title}</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      ) : (
+                        <span className="font-black">{selectedPortfolioItem.title}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 1-Click Human Refinements */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                    <span className="text-[10px] font-bold text-slate-400">تعديل سريع:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRefineProposal("shorten")}
+                      disabled={refiningProposal || generatingProposal}
+                      className="px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer"
+                    >
+                      ✂️ اختصر للنصف
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRefineProposal("casual")}
+                      disabled={refiningProposal || generatingProposal}
+                      className="px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer"
+                    >
+                      💬 أكثر عفوية
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRefineProposal("change_question")}
+                      disabled={refiningProposal || generatingProposal}
+                      className="px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold transition shadow-2xs disabled:opacity-50 cursor-pointer"
+                    >
+                      🔄 غيّر السؤال الختامي
+                    </button>
+                  </div>
+                </div>
               ) : (
-                <textarea
-                  rows={10}
-                  value={generatedProposalText}
-                  onChange={(e) => setGeneratedProposalText(e.target.value)}
-                  dir="auto"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 leading-relaxed focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans select-text"
-                />
+                <div className="py-12 text-center rounded-xl bg-slate-50/70 border border-dashed border-slate-200">
+                  <Sparkles className="w-7 h-7 text-emerald-500 mx-auto mb-2 opacity-80" />
+                  <p className="text-xs font-bold text-slate-800">جاهز لصياغة العرض البشري</p>
+                  <p className="text-[11px] text-slate-400 mt-1 max-w-sm mx-auto">
+                    اختر الزاوية بالأعلى ثم اضغط &quot;صياغة العرض البشري&quot;
+                  </p>
+                </div>
               )}
             </div>
 

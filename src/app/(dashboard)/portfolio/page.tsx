@@ -43,6 +43,8 @@ interface FreelancerProfile {
   bio: string;
   skills: string[];
   tone_of_voice: string;
+  standing_instructions?: string;
+  writing_sample?: string;
 }
 
 export default function PortfolioPage() {
@@ -81,6 +83,11 @@ export default function PortfolioPage() {
   const [simulating, setSimulating] = useState(false);
   const [simulationResult, setSimulationResult] = useState<string | null>(null);
 
+  // Human Voice & Rules state
+  const [standingInstructions, setStandingInstructions] = useState("");
+  const [writingSample, setWritingSample] = useState("");
+  const [savingVoice, setSavingVoice] = useState(false);
+
   const fetchPortfolioData = async () => {
     setLoading(true);
     try {
@@ -88,12 +95,39 @@ export default function PortfolioPage() {
       const data = await res.json();
       if (data.ok) {
         setProfile(data.profile);
+        setStandingInstructions(data.profile?.standing_instructions || "");
+        setWritingSample(data.profile?.writing_sample || "");
         setPortfolioItems(data.portfolio_items || []);
       }
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveHumanVoice = async () => {
+    setSavingVoice(true);
+    try {
+      const res = await fetch("/api/portfolio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_human_voice",
+          standing_instructions: standingInstructions,
+          writing_sample: writingSample,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast("تم حفظ بصمتك الشخصية وقواعد الصياغة بنجاح ✍️");
+      } else {
+        alert(data.error || "فشل حفظ البصمة الشخصية");
+      }
+    } catch (err: any) {
+      alert("حدث خطأ أثناء الحفظ: " + err.message);
+    } finally {
+      setSavingVoice(false);
     }
   };
 
@@ -569,6 +603,93 @@ export default function PortfolioPage() {
             </div>
           )
         )}
+      </div>
+
+      {/* ====================================================================== */}
+      {/* ✍️ HUMAN VOICE & RULES (CLONING & STANDING INSTRUCTIONS) */}
+      {/* ====================================================================== */}
+      <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-5 border-b border-slate-100">
+          <div>
+            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200/60 text-[11px] font-bold mb-2">
+              <Sparkles className="w-3 h-3 text-indigo-600" />
+              <span>محاكاة الأسلوب البشري (Style Cloning)</span>
+            </div>
+            <h2 className="text-base sm:text-lg font-black text-slate-900">
+              ✍️ بصمتك الشخصية في كتابة العروض (Human Voice & Rules)
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              حدد شروطك الثابتة ونموذجاً حقيقياً من أسلوبك في الكتابة ليتعلم الذكاء الاصطناعي نبرتك الطبيعية ومفرداتك ويطبقها في كل عرض.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSaveHumanVoice}
+            disabled={savingVoice}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-sm transition disabled:opacity-50 self-start sm:self-auto cursor-pointer"
+          >
+            {savingVoice ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>جاري الحفظ...</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4 text-emerald-400" />
+                <span>حفظ البصمة الشخصية</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-5">
+          {/* Standing Instructions */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label htmlFor="standing-instructions" className="block text-xs font-black text-slate-800">
+                1. شروطك ومميزاتك الثابتة (Standing Instructions)
+              </label>
+              <span className="text-[11px] text-slate-400 font-medium">تُطبق في كل العروض</span>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              شروط عملك الخاصة، الضمانات التي تقدمها، أو ميزاتك التنافسية الثابتة.
+            </p>
+            <textarea
+              id="standing-instructions"
+              rows={4}
+              value={standingInstructions}
+              onChange={(e) => setStandingInstructions(e.target.value)}
+              placeholder="مثال: أقدم دعم فني مجاني وضمان صيانة لمدة 30 يوماً بعد التسليم، وأفضّل تقسيم العمل على مراحل واضحة (Milestones)، وتوثيق الكود بالكامل على GitHub..."
+              dir="auto"
+              className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-indigo-600 transition leading-relaxed font-sans"
+            />
+          </div>
+
+          {/* Writing Sample */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label htmlFor="writing-sample" className="block text-xs font-black text-slate-800">
+                2. نموذج عرض حقيقي كتبته بيدك سابقاً (Style Cloning)
+              </label>
+              <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200/60 px-2 py-0.5 rounded-full font-bold">
+                اختياري
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              الصق نص عرض حقيقي كتبته بنفسك وربحت به مشروعاً، ليحاكي الـ AI طول جملك ونبرتك الطبيعية.
+            </p>
+            <textarea
+              id="writing-sample"
+              rows={4}
+              value={writingSample}
+              onChange={(e) => setWritingSample(e.target.value)}
+              placeholder="مثال: أهلاً أحمد، اطلعت على مشكلة بطء تحميل المتجر عندك. السبب غالباً في استعلامات قاعدة البيانات للصور غير المضغوطة. في مشروعي السابق لمتجر فلان قمت بإعادة هيكلة الـ queries وخفضت وقت التحميل من 4 ثوانٍ إلى 0.8 ثانية. هل تستخدم قالب ووكومرس جاهز أم مخصص؟"
+              dir="auto"
+              className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-indigo-600 transition leading-relaxed font-sans"
+            />
+          </div>
+        </div>
       </div>
 
       {/* ====================================================================== */}

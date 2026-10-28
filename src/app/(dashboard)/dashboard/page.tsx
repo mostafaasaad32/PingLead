@@ -629,8 +629,15 @@ export default function DashboardPage() {
   // Proposal modal state
   const [proposalModalLead, setProposalModalLead] = useState<Lead | null>(null);
   const [generatingProposal, setGeneratingProposal] = useState(false);
+  const [refiningProposal, setRefiningProposal] = useState(false);
   const [generatedProposal, setGeneratedProposal] = useState("");
   const [proposalCopied, setProposalCopied] = useState(false);
+  const [pitchAngle, setPitchAngle] = useState<"direct" | "action_plan" | "snappy">("direct");
+  const [selectedPortfolioItem, setSelectedPortfolioItem] = useState<{
+    id: string;
+    title: string;
+    live_url?: string | null;
+  } | null>(null);
 
   // Tracker Items State (Saved Projects & Proposals)
   const [trackerItems, setTrackerItems] = useState<TrackedItem[]>([]);
@@ -888,12 +895,30 @@ export default function DashboardPage() {
     }
   };
 
-  // Open Proposal Modal & Generate Proposal
-  const handleOpenProposalModal = async (lead: Lead) => {
+  // Open Proposal Modal
+  const handleOpenProposalModal = (lead: Lead) => {
     setProposalModalLead(lead);
     setProposalCopied(false);
-    setGeneratedProposal("");
+    setPitchAngle("direct");
+
+    const targetId = lead.project_id || lead.id;
+    const existing = trackedActions[targetId]?.generated_proposal;
+
+    if (existing) {
+      setGeneratedProposal(existing);
+      setGeneratingProposal(false);
+    } else {
+      setGeneratedProposal("");
+      setGeneratingProposal(false);
+      setSelectedPortfolioItem(null);
+    }
+  };
+
+  // Generate / Regenerate Proposal with Pitch Angle
+  const handleGenerateProposal = async (lead: Lead, overrideAngle?: "direct" | "action_plan" | "snappy") => {
+    const angleToUse = overrideAngle || pitchAngle;
     setGeneratingProposal(true);
+    setProposalCopied(false);
 
     try {
       const res = await fetch("/api/proposals/generate", {
@@ -904,12 +929,22 @@ export default function DashboardPage() {
           project_id: lead.project_id,
           project_title: extractTitleFromPostText(lead.post_text) || "مشروع عمل حر",
           project_description: extractDetailsFromPostText(lead.post_text),
+          pitch_angle: angleToUse,
         }),
       });
 
       const data = await res.json();
       if (data.ok && data.proposal) {
         setGeneratedProposal(data.proposal);
+        if (data.selectedPortfolio && data.selectedPortfolio.length > 0) {
+          setSelectedPortfolioItem({
+            id: data.selectedPortfolio[0].id,
+            title: data.selectedPortfolio[0].title,
+            live_url: data.selectedPortfolio[0].live_url,
+          });
+        } else {
+          setSelectedPortfolioItem(null);
+        }
         if (typeof data.remaining_credits === "number") {
           setUserCredits(data.remaining_credits);
         }
@@ -917,7 +952,7 @@ export default function DashboardPage() {
         setTrackedActions((prev) => ({
           ...prev,
           [targetId]: {
-            ...prev[targetId], // keep ai_score / ai_reason
+            ...prev[targetId],
             id: data.action_id || targetId,
             project_id: targetId,
             status: prev[targetId]?.status || "matched",
@@ -925,7 +960,7 @@ export default function DashboardPage() {
             generated_proposal: data.proposal,
           },
         }));
-        showToast("تم توليد العرض الذكي وحفظ المسودة بنجاح!");
+        showToast("تم صياغة العرض البشري وحفظ المسودة بنجاح! ✨");
         fetchActions();
       } else {
         setGeneratedProposal("⚠️ تعذر توليد العرض: " + (data.error || "يرجى مراجعة الرصيد"));
@@ -934,6 +969,42 @@ export default function DashboardPage() {
       setGeneratedProposal("حدث خطأ في الاتصال بمولد العروض الذكي.");
     } finally {
       setGeneratingProposal(false);
+    }
+  };
+
+  // Quick Human Refinement
+  const handleRefineProposal = async (refinementType: "shorten" | "casual" | "change_question") => {
+    if (!proposalModalLead || !generatedProposal || refiningProposal) return;
+    setRefiningProposal(true);
+    try {
+      const res = await fetch("/api/proposals/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lead_id: proposalModalLead.id,
+          project_id: proposalModalLead.project_id,
+          project_title: extractTitleFromPostText(proposalModalLead.post_text) || "مشروع عمل حر",
+          project_description: extractDetailsFromPostText(proposalModalLead.post_text),
+          pitch_angle: pitchAngle,
+          refinement_type: refinementType,
+          existing_proposal: generatedProposal,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok && data.proposal) {
+        setGeneratedProposal(data.proposal);
+        showToast(
+          refinementType === "shorten"
+            ? "تم اختصار العرض للنصف بنجاح ✂️"
+            : refinementType === "casual"
+            ? "تمت إعادة الصياغة بنبرة أكثر عفوية 💬"
+            : "تم تغيير السؤال الفني الختامي 🔄"
+        );
+      }
+    } catch (e) {
+      showToast("تعذر التعديل السريع، حاول مرة أخرى");
+    } finally {
+      setRefiningProposal(false);
     }
   };
 
@@ -1502,58 +1573,206 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            {generatingProposal ? (
-              <div className="py-12 text-center">
-                <div className="w-10 h-10 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                <p className="text-xs font-bold text-slate-800">جاري صياغة العرض عبر محرك Gemini 2.0...</p>
-                <p className="text-[11px] text-slate-400 mt-1">يتم دمج سابقة أعمالك ونبرة صوتك تلقائياً.</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {/* Client Intelligence & Risk Card */}
-                <ClientIntelligenceCard evaluation={resolveClientEvaluation(proposalModalLead)} compact={false} />
+            <div className="space-y-4">
+              {/* Client Intelligence & Risk Card */}
+              <ClientIntelligenceCard evaluation={resolveClientEvaluation(proposalModalLead)} compact={false} />
 
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-800 leading-relaxed whitespace-pre-line font-sans">
-                  {generatedProposal}
-                </div>
-
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100">
-                  <span className="text-[11px] text-slate-400">
-                    يمكنك نسخ العرض والانتقال للمنصة لإرساله فوراً.
-                  </span>
-
-                  <div className="flex items-center gap-2 flex-wrap">
+              {/* Pitch Angle Selector Toolbar */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0">
+                  <span className="text-xs font-black text-slate-800 shrink-0">زاوية الصياغة:</span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <button
                       type="button"
-                      onClick={handleCopyProposal}
-                      className="py-2 px-3.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition shadow-2xs"
+                      onClick={() => setPitchAngle("direct")}
+                      disabled={generatingProposal || refiningProposal}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                        pitchAngle === "direct"
+                          ? "bg-emerald-600 text-white shadow-2xs"
+                          : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                      }`}
                     >
-                      {proposalCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{proposalCopied ? "تم النسخ!" : "نسخ نص العرض"}</span>
+                      <span>🎯 مباشر + سابقة أعمال</span>
                     </button>
-
                     <button
                       type="button"
-                      onClick={() => handleToggleSaveLead(proposalModalLead)}
-                      className="py-2 px-3.5 rounded-xl border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs flex items-center gap-1.5 transition shadow-2xs"
+                      onClick={() => setPitchAngle("action_plan")}
+                      disabled={generatingProposal || refiningProposal}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                        pitchAngle === "action_plan"
+                          ? "bg-emerald-600 text-white shadow-2xs"
+                          : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                      }`}
                     >
-                      <Bookmark className="w-3.5 h-3.5" />
-                      <span>حفظ في المشاريع المحفوظة</span>
+                      <span>🛠️ خطة عمل (1-2-3)</span>
                     </button>
-
-                    <a
-                      href={proposalModalLead.post_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="py-2 px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-xs"
+                    <button
+                      type="button"
+                      onClick={() => setPitchAngle("snappy")}
+                      disabled={generatingProposal || refiningProposal}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                        pitchAngle === "snappy"
+                          ? "bg-emerald-600 text-white shadow-2xs"
+                          : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                      }`}
                     >
-                      <span>الانتقال للمنصة</span>
-                      <ExternalLink className="w-3 h-3 text-slate-400" />
-                    </a>
+                      <span>⚡ خاطف (4 أسطر)</span>
+                    </button>
                   </div>
                 </div>
+
+                <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateProposal(proposalModalLead)}
+                    disabled={generatingProposal || refiningProposal}
+                    className="h-8 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-2xs cursor-pointer disabled:opacity-50"
+                  >
+                    {generatingProposal ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>جاري الصياغة...</span>
+                      </>
+                    ) : generatedProposal ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>إعادة صياغة بهذه الزاوية</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>صياغة العرض البشري (1 نقطة)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
-            )}
+
+              {/* Status or Generated Proposal View */}
+              {generatingProposal ? (
+                <div className="py-12 text-center rounded-2xl bg-slate-50 border border-slate-200/70">
+                  <div className="w-9 h-9 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                  <p className="text-xs font-bold text-slate-800">جاري تشخيص طلب العميل وصياغة الرد البشري...</p>
+                  <p className="text-[11px] text-slate-400 mt-1">يتم حياكة سابقة أعمالك المناسبة وصياغة السؤال الفني الختامي.</p>
+                </div>
+              ) : generatedProposal ? (
+                <div className="space-y-3">
+                  <div className="relative">
+                    <textarea
+                      rows={9}
+                      value={generatedProposal}
+                      onChange={(e) => setGeneratedProposal(e.target.value)}
+                      dir="auto"
+                      disabled={refiningProposal}
+                      className="w-full p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-800 leading-relaxed font-sans focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 select-text disabled:opacity-60"
+                    />
+                    {refiningProposal && (
+                      <div className="absolute inset-0 bg-white/70 backdrop-blur-xs rounded-2xl flex items-center justify-center gap-2 text-xs font-bold text-slate-700">
+                        <div className="w-4 h-4 border-2 border-slate-700 border-t-transparent rounded-full animate-spin" />
+                        <span>جاري التعديل البشري السريع...</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Portfolio Citation Badge */}
+                  {selectedPortfolioItem && (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-200/80 text-xs font-bold">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>✨ تم ربط العرض تلقائياً بـ: </span>
+                      {selectedPortfolioItem.live_url ? (
+                        <a
+                          href={selectedPortfolioItem.live_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline hover:text-emerald-700 inline-flex items-center gap-1 font-black"
+                        >
+                          <span>{selectedPortfolioItem.title}</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      ) : (
+                        <span className="font-black">{selectedPortfolioItem.title}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 1-Click Human Refinement Buttons */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                    <span className="text-[11px] font-bold text-slate-500">تعديل بشري سريع:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRefineProposal("shorten")}
+                      disabled={refiningProposal || generatingProposal}
+                      className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center gap-1 shadow-2xs disabled:opacity-50 cursor-pointer"
+                      title="اختصار العرض للنصف مع الحفاظ على الربط والسؤال"
+                    >
+                      <span>✂️ اختصر العرض للنصف</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRefineProposal("casual")}
+                      disabled={refiningProposal || generatingProposal}
+                      className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center gap-1 shadow-2xs disabled:opacity-50 cursor-pointer"
+                      title="جعله أكثر عفوية وبساطة بدون تكلف"
+                    >
+                      <span>💬 اجعله أكثر عفوية</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRefineProposal("change_question")}
+                      disabled={refiningProposal || generatingProposal}
+                      className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center gap-1 shadow-2xs disabled:opacity-50 cursor-pointer"
+                      title="تغيير السؤال الفني الختامي"
+                    >
+                      <span>🔄 غيّر السؤال الختامي</span>
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                    <span className="text-[11px] text-slate-400">
+                      يمكنك تعديل نص العرض مباشرة أو نسخه والانتقال للمنصة.
+                    </span>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={handleCopyProposal}
+                        className="py-2 px-3.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
+                      >
+                        {proposalCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{proposalCopied ? "تم النسخ!" : "نسخ نص العرض"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSaveLead(proposalModalLead)}
+                        className="py-2 px-3.5 rounded-xl border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
+                      >
+                        <Bookmark className="w-3.5 h-3.5" />
+                        <span>حفظ في المشاريع</span>
+                      </button>
+
+                      <a
+                        href={proposalModalLead.post_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="py-2 px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-xs"
+                      >
+                        <span>الانتقال للمنصة والتقديم</span>
+                        <ExternalLink className="w-3 h-3 text-slate-400" />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-8 text-center rounded-2xl bg-slate-50/70 border border-dashed border-slate-200">
+                  <Sparkles className="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-80" />
+                  <p className="text-xs font-bold text-slate-800">العرض جاهز للصياغة البشرية</p>
+                  <p className="text-[11px] text-slate-400 mt-1 max-w-sm mx-auto">
+                    اختر زاوية التقديم المناسبة بالأعلى واضغط &quot;صياغة العرض البشري&quot; للحصول على عرض شخصي مقنع.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -126,13 +126,7 @@ export default function TopNavbar() {
       icon: Filter,
       isActive: pathname.startsWith("/filters"),
     },
-    {
-      name: "Proposal Templates",
-      labelAr: "قوالب العروض",
-      href: "/templates",
-      icon: FileText,
-      isActive: pathname.startsWith("/templates"),
-    },
+
     {
       name: "AI Portfolio",
       labelAr: "مخزن الأعمال الذكي",

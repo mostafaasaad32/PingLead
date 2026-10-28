@@ -40,16 +40,24 @@ export async function GET(req: NextRequest) {
 
     const items: any[] = dbItems || [];
 
+    const effectiveProfile = profile ? {
+      ...profile,
+      standing_instructions: profile.proposal_instructions || "",
+      writing_sample: (profile as any).writing_sample || (profile as any).persona_ar?.writing_sample || (profile as any).persona_en?.writing_sample || "",
+    } : {
+      user_id: user.id,
+      full_name: user.user_metadata?.full_name || "مستقل محترف",
+      title: "Senior Full-Stack Specialist",
+      bio: "مطور برمجيات مستقل متخصص في إنجاز المشاريع التقنية المعقدة.",
+      skills: ["React", "Next.js", "TypeScript", "Supabase"],
+      tone_of_voice: "confident",
+      standing_instructions: "",
+      writing_sample: "",
+    };
+
     return NextResponse.json({
       ok: true,
-      profile: profile || {
-        user_id: user.id,
-        full_name: user.user_metadata?.full_name || "مستقل محترف",
-        title: "Senior Full-Stack Specialist",
-        bio: "مطور برمجيات مستقل متخصص في إنجاز المشاريع التقنية المعقدة.",
-        skills: ["React", "Next.js", "TypeScript", "Supabase"],
-        tone_of_voice: "confident",
-      },
+      profile: effectiveProfile,
       portfolio_items: items,
     });
   } catch (err: any) {
@@ -178,6 +186,55 @@ export async function POST(req: NextRequest) {
       if (error) throw error;
 
       return NextResponse.json({ ok: true, message: "تم تحديث الملف الشخصي" });
+    }
+
+    // Action E: Save Human Voice & Writing Sample
+    if (action === "save_human_voice") {
+      const { standing_instructions, writing_sample } = body;
+
+      const { data: currentProfile } = await (supabase
+        .from("freelancer_profiles") as any)
+        .select("persona_ar, persona_en")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      const updatedPersonaAr = {
+        ...(currentProfile?.persona_ar || {}),
+        writing_sample: (writing_sample || "").trim(),
+      };
+      const updatedPersonaEn = {
+        ...(currentProfile?.persona_en || {}),
+        writing_sample: (writing_sample || "").trim(),
+      };
+
+      const payload: Record<string, any> = {
+        proposal_instructions: (standing_instructions || "").trim() || null,
+        persona_ar: updatedPersonaAr,
+        persona_en: updatedPersonaEn,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Try with writing_sample column directly, falling back if column is not yet present
+      const { error: colErr } = await (supabase
+        .from("freelancer_profiles") as any)
+        .update({
+          ...payload,
+          writing_sample: (writing_sample || "").trim() || null,
+        })
+        .eq("user_id", user.id);
+
+      if (colErr) {
+        const { error: fallbackErr } = await (supabase
+          .from("freelancer_profiles") as any)
+          .update(payload)
+          .eq("user_id", user.id);
+        if (fallbackErr) throw fallbackErr;
+      }
+
+      return NextResponse.json({
+        ok: true,
+        message: "تم حفظ بصمتك الشخصية وقواعد الصياغة بنجاح",
+      });
     }
 
     return NextResponse.json({ error: "إجراء غير معروف" }, { status: 400 });

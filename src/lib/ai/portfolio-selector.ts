@@ -102,7 +102,7 @@ export function selectBestPortfolioItems(
  */
 export function formatPortfolioForPrompt(selectedItems: ScoredPortfolioItem[]): string {
   if (!selectedItems || selectedItems.length === 0) {
-    return 'WORK ITEMS: none related to this project. Do not mention any past work or links.';
+    return 'PORTFOLIO WEAVING: No past work item in the portfolio closely matches this project. DO NOT mention or fabricate any past work items or links. Focus directly on diagnosing the problem and presenting the solution plan.';
   }
 
   const itemsFormatted = selectedItems
@@ -110,12 +110,19 @@ export function formatPortfolioForPrompt(selectedItems: ScoredPortfolioItem[]): 
       const p = scored.item;
       const linkStr = p.live_url ? ` | Live Link: ${p.live_url}` : '';
       const tagsStr = Array.isArray(p.tags) && p.tags.length > 0 ? ` [${p.tags.join(', ')}]` : '';
-      return `${index + 1}. "${p.project_title}"${tagsStr}${linkStr}\n   Brief: ${p.description.slice(0, 250)}`;
+      return `Item #${index + 1}: "${p.project_title}"${tagsStr}${linkStr}\n   Brief: ${p.description.slice(0, 300)}`;
     })
     .join('\n\n');
 
   return `
-WORK ITEMS related to this project (you may mention the most relevant one, in one plain sentence with its link):
+PORTFOLIO CONTEXT (WEAVE INTO THE SOLUTION SENTENCE):
+You have real matching work item(s) from your actual portfolio:
 ${itemsFormatted}
+
+CRITICAL WEAVING INSTRUCTION:
+- Weave the best matching item above naturally inside your solution sentence.
+- Arabic example: "نفذت فكرة مشابهة جداً في مشروع [اسم العمل] ([الرابط]) حيث قمت ببناء [التفصيلة المشتركة]..."
+- English example: "I recently built a very similar setup for [Portfolio Title] ([URL]), where I handled [specific matching detail]..."
+- NEVER list portfolio items as a disconnected list at the end. Weave it directly into the explanation of how you solve this client's problem.
 `.trim();
 }
