@@ -2333,17 +2333,19 @@ export async function auditMostaqlProfileWithAi(
   const words = rawBio.trim() ? rawBio.trim().split(/\s+/).length : 0;
   const chars = rawBio.length;
 
-  const currentTitle = p?.headline || "مطور ومستقل محترف";
-  const freelancerName = p?.fullName || "مستقل محترف";
+  // Values the scraper couldn't read are sent as "غير متاح", never as made-up numbers
+  // ("100%", "5.0", "مطور ومستقل محترف") that the AI would then grade as the user's own
+  const currentTitle = p?.headline || "غير متاح";
+  const freelancerName = p?.fullName || "غير متاح";
   const avatarUrl = p?.avatarUrl || null;
 
   const portfolioCount = p?.portfolioCount ?? p?.portfolioItems?.length ?? 0;
-  const completionRate = p?.stats?.completionRate || "100%";
-  const rehireRate = p?.stats?.rehireRate || "0%";
-  const onTimeDelivery = p?.stats?.onTimeDelivery || "100%";
-  const responseSpeed = p?.stats?.responseSpeed || "خلال ساعات";
-  const completedProjects = p?.stats?.completedProjects || 0;
-  const overallRating = p?.stats?.overallRating || "5.0";
+  const completionRate = p?.stats?.completionRate || "غير متاح";
+  const rehireRate = p?.stats?.rehireRate || "غير متاح";
+  const onTimeDelivery = p?.stats?.onTimeDelivery || "غير متاح";
+  const responseSpeed = p?.stats?.responseSpeed || "غير متاح";
+  const completedProjects = p?.stats?.completedProjects ?? "غير متاح";
+  const overallRating = p?.stats?.overallRating || "غير متاح";
   const badges = p?.stats?.badges || ["مستقل مسجل"];
 
   const promptText = `
@@ -2358,12 +2360,14 @@ export async function auditMostaqlProfileWithAi(
 - المشاريع المكتملة: ${completedProjects}
 - الأوسمة الحالية: ${badges.join("، ")}
 - عدد الأعمال المنشورة في المعرض: ${portfolioCount}
-- المهارات الحالية (${p?.skills?.length || 0}): ${p?.skills?.join("، ") || "لم تُحدد مهارات"}
+- المهارات الحالية: ${p?.skills?.length ? p.skills.join("، ") : "غير متاح"}
 - الأعمال المنشورة الحالية:
 ${(p?.portfolioItems || []).map((item, idx) => `${idx + 1}. ${item.title}: ${item.description}`).join("\n") || "لا توجد أعمال منشورة في المعرض"}
 
 النبذة الحالية:
-${rawBio}
+${rawBio || "غير متاح"}
+
+ملحوظة مهمة: أي قيمة مكتوب عليها «غير متاح» معناها إننا ماقدرناش نقرأها من صفحة البروفايل، مش إنها صفر أو ضعيفة. متحكمش عليها، ومتديش نصيحة مبنية عليها.
 `.trim();
 
   const contents = [
@@ -2672,14 +2676,14 @@ export async function auditKhamsatProfileWithAi(params: {
   const words = rawBio.trim() ? rawBio.trim().split(/\s+/).length : 0;
   const chars = rawBio.length;
 
-  const currentTitle = p?.headline || "بائع موثوق في خمسات";
-  const freelancerName = p?.fullName || "بائع خمسات";
+  const currentTitle = p?.headline || "غير متاح";
+  const freelancerName = p?.fullName || "غير متاح";
   const avatarUrl = p?.avatarUrl || null;
 
-  const sellerLevel = p?.stats?.sellerLevel || "بائع جديد";
-  const overallRating = p?.stats?.overallRating || "100%";
-  const clientsCount = p?.stats?.clientsCount || "0";
-  const responseSpeed = p?.stats?.responseSpeed || "خلال ساعة";
+  const sellerLevel = p?.stats?.sellerLevel || "غير متاح";
+  const overallRating = p?.stats?.overallRating || "غير متاح";
+  const clientsCount = p?.stats?.clientsCount || "غير متاح";
+  const responseSpeed = p?.stats?.responseSpeed || "غير متاح";
   const gigsCount = p?.gigs?.length || p?.portfolioCount || 0;
 
   const khamsatSystemInstruction = `
@@ -2782,7 +2786,9 @@ export async function auditKhamsatProfileWithAi(params: {
 ${(p?.gigs || []).map((g, i) => `${i + 1}. ${g.title} (${g.price || "5$"})`).join("\n") || "لا توجد خدمات معروضة حالياً"}
 
 النبذة الحالية:
-${rawBio}
+${rawBio || "غير متاح"}
+
+ملحوظة مهمة: أي قيمة مكتوب عليها «غير متاح» معناها إننا ماقدرناش نقرأها من صفحة البروفايل، مش إنها صفر أو ضعيفة. متحكمش عليها، ومتديش نصيحة مبنية عليها.
 `.trim();
 
   const contents = [

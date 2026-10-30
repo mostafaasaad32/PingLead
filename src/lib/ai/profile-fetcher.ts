@@ -296,26 +296,27 @@ export async function scrapeMostaqlProfile(
   // 6. Clean Text Parsing for Stats & Badges (Free of raw HTML artifacts)
   const cleanBodyText = $("body").text().replace(/\s+/g, " ");
 
-  let overallRating = "5.0";
+  // No defaults: a missing value stays missing instead of becoming "5.0" / "100%"
+  let overallRating: string | undefined;
   const ratingMatch =
     cleanBodyText.match(/التقييم(?:\s*العام)?\s*:?\s*([0-9.]+)\s*(?:من\s*5|\/5)?/i) ||
     cleanBodyText.match(/([0-9.]+)\s*(?:من\s*5|\/5)\s*stars/i) ||
     $(".stars-active, .rating-score, .profile-rating").first().text().match(/([0-9.]+)/);
   if (ratingMatch) overallRating = ratingMatch[1];
 
-  let completionRate = "100%";
+  let completionRate: string | undefined;
   const completionMatch = cleanBodyText.match(/معدل\s*إكمال\s*المشاريع\s*:?\s*(\d+)%/i);
   if (completionMatch) completionRate = `${completionMatch[1]}%`;
 
-  let rehireRate = "0%";
+  let rehireRate: string | undefined;
   const rehireMatch = cleanBodyText.match(/معدل\s*إعادة\s*التوظيف\s*:?\s*(\d+)%/i);
   if (rehireMatch) rehireRate = `${rehireMatch[1]}%`;
 
-  let onTimeDelivery = "100%";
+  let onTimeDelivery: string | undefined;
   const onTimeMatch = cleanBodyText.match(/التسليم\s*في\s*الموعد\s*:?\s*(\d+)%/i);
   if (onTimeMatch) onTimeDelivery = `${onTimeMatch[1]}%`;
 
-  let responseSpeed = "خلال ساعات";
+  let responseSpeed: string | undefined;
   const speedMatch =
     cleanBodyText.match(/متوسط\s*سرعة\s*الرد\s*:?\s*([^،.\n]{3,35})/i) ||
     cleanBodyText.match(/سرعة\s*الرد\s*:?\s*([^،.\n]{3,35})/i);
@@ -441,11 +442,14 @@ export async function scrapeNafezlyProfile(
     $(".user-name, .profile-name").first().text().trim() ||
     username;
 
-  const headline =
-    $(".profile-title, .user-job, .speciality, h2").first().text().replace(/\s+/g, " ").trim() ||
-    "مستقل على منصة نفذلي";
+  const headline = $(".profile-title, .user-job, .speciality, h2").first().text().replace(/\s+/g, " ").trim();
 
-  let bio = $(".user-bio, .about-me, #about, .profile-bio, p").first().text().replace(/\s+/g, " ").trim();
+  // The visible "نبذة عني" text is h1.bio-old (the first <p> on the page is unrelated, ~16 chars);
+  // the meta description carries the start of it as a fallback
+  let bio =
+    $("h1.bio-old, .bio-old").first().text().replace(/\s+/g, " ").trim() ||
+    ($('meta[name="description"]').attr("content") || "").replace(/\s+/g, " ").trim() ||
+    $(".user-bio, .about-me, #about, .profile-bio").first().text().replace(/\s+/g, " ").trim();
   if (!bio) {
     $("h2, h3, h4").each((_, el) => {
       if ($(el).text().includes("نبذة") || $(el).text().includes("عن المستقل")) {
@@ -475,12 +479,13 @@ export async function scrapeNafezlyProfile(
 
   const textBody = html.replace(/\s+/g, " ");
 
-  // Stats
-  let overallRating = "5.0";
+  // Stats: only what the page shows. No defaults: a made-up "5.0" or "20% rehire" would be
+  // presented to the user as their own numbers and graded by the AI.
+  let overallRating: string | undefined;
   const rMatch = textBody.match(/([0-9.]+)\s*(?:من\s*5|\/5|\(\d+\s*تقييم\))/);
   if (rMatch) overallRating = rMatch[1];
 
-  let completedProjects = 0;
+  let completedProjects: number | undefined;
   const cpMatch = textBody.match(/(\d+)\s*مشروع\s*(?:منجز|مكتمل)/i) || textBody.match(/المشاريع\s*المنجزة\s*:?\s*(\d+)/i);
   if (cpMatch) completedProjects = parseInt(cpMatch[1], 10);
 
@@ -506,10 +511,32 @@ export async function scrapeNafezlyProfile(
     }
   });
 
+  // The profile page only links to the portfolio tab: read /u/<name>/portfolio (titles are the image alt text)
+  if (portfolioItems.length === 0) {
+    const portfolioHtml = await fetchHtmlWithBrowserFallback(`${targetUrl}/portfolio`, 10000).catch(() => "");
+    if (portfolioHtml) {
+      const $p = cheerio.load(portfolioHtml);
+      $p("a[href*='nafezly.com/portfolio/'], a[href^='/portfolio/']").each((_, el) => {
+        const href = $p(el).attr("href") || "";
+        const pTitle = ($p(el).find("img").attr("alt") || $p(el).text()).replace(/\s+/g, " ").trim();
+        const pUrl = href.startsWith("/") ? `https://nafezly.com${href}` : href;
+        if (pTitle && pTitle.length > 3 && pTitle.length < 150 && !portfolioItems.some((i) => i.project_url === pUrl || i.title === pTitle)) {
+          portfolioItems.push({
+            title: pTitle,
+            description: pTitle,
+            project_url: pUrl,
+            skills: skills.slice(0, 4),
+            category: inferProjectCategory(pTitle, pTitle, skills),
+          });
+        }
+      });
+    }
+  }
+
   return {
     fullName,
     headline,
-    bio: bio || `مستقل متخصص في ${skills.slice(0, 4).join("، ")}.`,
+    bio,
     skills,
     portfolioItems,
     portfolioCount: portfolioItems.length,
@@ -520,10 +547,6 @@ export async function scrapeNafezlyProfile(
       overallRating,
       completedProjects,
       portfolioCount: portfolioItems.length,
-      completionRate: "100%",
-      rehireRate: "20%",
-      onTimeDelivery: "100%",
-      responseSpeed: "خلال ساعات",
       badges,
     },
   };
@@ -550,10 +573,27 @@ export async function scrapeKhamsatProfile(
     throw new Error("تعذر جلب بروفايل خمسات. يرجى التأكد من صحة الرابط.");
   }
 
+  // Khamsat answers bots with an AWS WAF challenge (HTTP 202) and the fallback reader then
+  // returns the login page: grading that produced "تسجيل الدخول" as the name and "0 services".
+  // Stop and ask for the profile text instead of auditing a page that isn't the profile.
+  const looksBlocked =
+    /awswaf|challenge\.js|captcha/i.test(html) ||
+    /تسجيل الدخول|Log in to Khamsat|كلمة المرور/i.test(html.slice(0, 4000)) && !new RegExp(username, "i").test(html);
+  if (looksBlocked) {
+    throw new Error(
+      "خمسات منع قراءة صفحة البروفايل تلقائياً. افتح بروفايلك على خمسات وانسخ النبذة وأسماء خدماتك، والزقهم في تبويب «نص خام»."
+    );
+  }
+
   const $ = cheerio.load(html);
   const fullName =
     $(".user-details h1, .user-name, h1").first().text().replace(/\s+/g, " ").trim() ||
     username;
+  if (/تسجيل الدخول|إنشاء حساب/.test(fullName)) {
+    throw new Error(
+      "خمسات منع قراءة صفحة البروفايل تلقائياً. افتح بروفايلك على خمسات وانسخ النبذة وأسماء خدماتك، والزقهم في تبويب «نص خام»."
+    );
+  }
 
   const bio =
     $(".user-bio, .profile-description, #user-brief, .carda__content").first().text().replace(/\s+/g, " ").trim();
@@ -572,24 +612,25 @@ export async function scrapeKhamsatProfile(
 
   const textBody = html.replace(/\s+/g, " ");
 
-  // Seller level (رتبة البائع)
-  let sellerLevel = "بائع جديد";
+  // Only values the page shows; nothing is assumed (see Nafezly above)
+  let sellerLevel: string | undefined;
   if (textBody.includes("بائع موثوق")) sellerLevel = "بائع موثوق";
   else if (textBody.includes("بائع مميز")) sellerLevel = "بائع مميز";
   else if (textBody.includes("بائع نشيط")) sellerLevel = "بائع نشيط";
+  else if (textBody.includes("بائع جديد")) sellerLevel = "بائع جديد";
 
-  // Rating
-  let overallRating = "100%";
-  const rMatch = textBody.match(/التقييم(?:\s*العام)?\s*:?\s*(\d+)%/i) || textBody.match(/([0-9.]+)%/);
+  // Rating: only the labelled one (any other "%" on the page is not the seller's rating)
+  let overallRating: string | undefined;
+  const rMatch = textBody.match(/التقييم(?:\s*العام)?\s*:?\s*(\d+)%/i);
   if (rMatch) overallRating = `${rMatch[1]}%`;
 
   // Clients Count (عدد العملاء / المشترين)
-  let clientsCount = "0";
+  let clientsCount: string | undefined;
   const clMatch = textBody.match(/عدد\s*العملاء\s*:?\s*(\d+)/i) || textBody.match(/(\d+)\s*مشتري/i);
   if (clMatch) clientsCount = clMatch[1];
 
   // Response speed
-  let responseSpeed = "خلال ساعة";
+  let responseSpeed: string | undefined;
   const spMatch = textBody.match(/سرعة\s*الرد\s*:?\s*([^،.\n<]{3,30})/i);
   if (spMatch) responseSpeed = spMatch[1].trim();
 
@@ -606,12 +647,12 @@ export async function scrapeKhamsatProfile(
     const sTitle =
       $(el).find("h3, .service-title, .card__title, a[href*='/service/']").first().text().replace(/\s+/g, " ").trim();
     const sLink = $(el).find("a[href*='/service/']").first().attr("href") || "";
-    const sPrice = $(el).find(".price, .service-price, .badge-price").first().text().trim() || "$5";
+    const sPrice = $(el).find(".price, .service-price, .badge-price").first().text().trim();
 
     if (sTitle && sTitle.length > 5 && !gigs.some((g) => g.title === sTitle)) {
       gigs.push({
         title: sTitle,
-        price: sPrice.includes("$") ? sPrice : `$${sPrice}`,
+        price: sPrice ? (sPrice.includes("$") ? sPrice : `$${sPrice}`) : undefined,
         url: sLink ? (sLink.startsWith("/") ? `https://khamsat.com${sLink}` : sLink) : undefined,
       });
     }
@@ -624,12 +665,12 @@ export async function scrapeKhamsatProfile(
 
   return {
     fullName,
-    headline: `${sellerLevel} في خمسات`,
-    bio: bio || `بائع موثوق يقدم خدمات مصغرة احترافية على خمسات بتقييم ممتاز.`,
-    skills: skills.length ? skills : ["خدمات مصغرة", "تنفيذ احترافي", "دعم فني"],
+    headline: sellerLevel ? `${sellerLevel} في خمسات` : "",
+    bio,
+    skills,
     portfolioItems: gigs.map(g => ({
       title: g.title,
-      description: `خدمة معروضة على خمسات بسعر ${g.price || "$5"}`,
+      description: g.price ? `خدمة معروضة على خمسات بسعر ${g.price}` : "خدمة معروضة على خمسات",
       project_url: g.url,
       skills: ["خدمات خمسات"],
       category: "service",
