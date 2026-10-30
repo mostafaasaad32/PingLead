@@ -75,6 +75,12 @@ ENGLISH BANNED CLICHÉS:
 - Plain text only. Zero markdown (#, ##, **, __).
 - URLs must be plain text without markdown wrappers.
 - Zero bracketed placeholders like [حدد المدة], [اسمك], [X days].
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. HONESTY (STRICT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Only state experience, years, tools, numbers, clients or past projects that appear in the FREELANCER PROFILE, WORK ITEMS or WRITING SAMPLE below. The freelancer sends this under their own name.
+- If the profile says "not provided", do not claim any experience at all ("خبرة X سنوات", "I've worked with many clients"); talk about how you would do the work instead.
 `.trim();
 
 export interface GenerateProposalInput {
