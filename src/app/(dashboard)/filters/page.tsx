@@ -49,6 +49,7 @@ import {
 } from "@/lib/scrapers/types";
 import { PlatformLogo } from "@/lib/platform-themes";
 import { isCategoryMatch } from "@/lib/filters/categorizer";
+import { EXCLUDE_SUGGESTIONS, includeSuggestionsFor } from "@/lib/filters/keyword-suggestions";
 import { COUNTRY_OPTIONS, GULF_COUNTRY_CODES, countryCodeFor } from "@/lib/filters/countries";
 
 // Quick lookup map for platform metadata
@@ -894,6 +895,9 @@ export default function JobFiltersWorkspace() {
                   <label className="text-[11px] font-bold text-slate-600 block mb-1">
                     كلمات مطلوبة:
                   </label>
+                  <p className="text-[10px] text-slate-400 mb-1.5 leading-relaxed">
+                    المشروع لازم يكون فيه واحدة منهم على الأقل. سيبها فاضية عشان يوصلك كل مشاريع تخصصك.
+                  </p>
                   <div className="flex items-center gap-1.5 mb-1.5">
                     <input
                       type="text"
@@ -938,6 +942,27 @@ export default function JobFiltersWorkspace() {
                     </div>
                   )}
                 </div>
+
+                {(() => {
+                  const chips = includeSuggestionsFor(selectedCategories).filter((k) => !includeTags.includes(k));
+                  return chips.length > 0 ? (
+                    <div className="-mt-1">
+                      <div className="text-[10px] text-slate-400 mb-1">اقتراحات (دوس للإضافة):</div>
+                      <div className="flex flex-wrap gap-1">
+                        {chips.map((k) => (
+                          <button
+                            key={k}
+                            type="button"
+                            onClick={() => setIncludeTags([...includeTags, k])}
+                            className="text-[11px] px-2 py-0.5 rounded border border-dashed border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition"
+                          >
+                            + {k}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
 
                 {/* Exclude Keywords */}
                 <div>
@@ -985,6 +1010,23 @@ export default function JobFiltersWorkspace() {
                           </button>
                         </span>
                       ))}
+                    </div>
+                  )}
+                  {EXCLUDE_SUGGESTIONS.some((k) => !excludeTags.includes(k)) && (
+                    <div className="mt-1.5">
+                      <div className="text-[10px] text-slate-400 mb-1">حاجات أغلب الفريلانسرز بيستبعدوها:</div>
+                      <div className="flex flex-wrap gap-1">
+                        {EXCLUDE_SUGGESTIONS.filter((k) => !excludeTags.includes(k)).map((k) => (
+                          <button
+                            key={k}
+                            type="button"
+                            onClick={() => setExcludeTags([...excludeTags, k])}
+                            className="text-[11px] px-2 py-0.5 rounded border border-dashed border-rose-300 text-rose-700 hover:bg-rose-50 transition"
+                          >
+                            − {k}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
